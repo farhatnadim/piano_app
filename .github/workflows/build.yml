@@ -1,0 +1,70 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-tests:
+    name: Core tests (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-26]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: xcodebuild -version && swift --version
+      - name: Test PianoCoachCore
+        run: swift test --package-path Packages/PianoCoachCore
+
+  app:
+    name: App (${{ matrix.platform }}, ${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-26]
+        platform: [iOS, macOS]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: xcodebuild -version
+      - name: Build
+        run: |
+          if [ "${{ matrix.platform }}" = "iOS" ]; then
+            DESTINATION="generic/platform=iOS Simulator"
+          else
+            DESTINATION="generic/platform=macOS"
+          fi
+          set +e
+          xcodebuild build \
+            -project PianoCoach.xcodeproj \
+            -scheme PianoCoach \
+            -configuration Debug \
+            -destination "$DESTINATION" \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            > build.log 2>&1
+          STATUS=$?
+          echo "::group::Errors and warnings"
+          grep -E "(error|warning):" build.log | sort -u | head -300
+          echo "::endgroup::"
+          tail -n 20 build.log
+          exit $STATUS
+      - name: Check bundled web assets
+        run: |
+          APP=$(find build/Build/Products -maxdepth 3 -name "PianoCoach.app" | head -1)
+          echo "App: $APP"
+          find "$APP" -path "*WebAssets*" | sort
+          find "$APP" -name "sheet.html" | grep -q WebAssets
+          find "$APP" -name "youtube_player.html" | grep -q WebAssets
+          find "$APP" -name "opensheetmusicdisplay.min.js" | grep -q WebAssets
