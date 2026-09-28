@@ -1,0 +1,194 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=4">
+<title>Sheet</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #ffffff; -webkit-user-select: none; user-select: none; }
+  #sheet { padding: 4px 0 48px 0; }
+  #message { font: 15px -apple-system, system-ui, sans-serif; color: #666; text-align: center; padding: 24px; }
+</style>
+<script src="opensheetmusicdisplay.min.js"></script>
+</head>
+<body>
+<div id="message"></div>
+<div id="sheet"></div>
+<script>
+(function () {
+  "use strict";
+
+  function post(message) {
+    try {
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.sheet) {
+        window.webkit.messageHandlers.sheet.postMessage(message);
+      }
+    } catch (e) { /* not running inside the app */ }
+    if (window.__sheetMessages) { window.__sheetMessages.push(message); }
+  }
+
+  var osmd = null;
+  var steps = [];          // [{m: sourceMeasureIndex, b: beatInMeasure (quarters), t: enrolled beat (quarters)}]
+  var currentStep = -1;
+  var zoom = 1.0;
+  var cursorVisible = false;
+
+  function ensureOSMD() {
+    if (osmd) { return osmd; }
+    if (!window.opensheetmusicdisplay) { throw new Error("OpenSheetMusicDisplay failed to load"); }
+    osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay("sheet", {
+      autoResize: true,
+      backend: "svg",
+      drawTitle: true,
+      drawSubtitle: false,
+      drawComposer: true,
+      drawCredits: false,
+      drawPartNames: false,
+      followCursor: true,
+      cursorsOptions: [{ type: 0, color: "#22b14c", alpha: 0.45, follow: true }]
+    });
+    return osmd;
+  }
+
+  function computeSteps() {
+    steps = [];
+    var it = osmd.cursor.Iterator.clone();
+    var guard = 0;
+    while (!it.EndReached && guard < 200000) {
+      steps.push({
+        m: it.CurrentMeasureIndex,
+        b: it.CurrentRelativeInMeasureTimestamp.RealValue * 4,
+        t: it.CurrentEnrolledTimestamp.RealValue * 4
+      });
+      it.moveToNext();
+      guard += 1;
+    }
+  }
+
+  function goToStep(index) {
+    if (!osmd || steps.length === 0) { return; }
+    index = Math.max(0, Math.min(steps.length - 1, index));
+    var cursor = osmd.cursor;
+    if (index < currentStep || currentStep < 0) {
+      cursor.resetIterator();
+      currentStep = 0;
+    }
+    while (currentStep < index && !cursor.Iterator.EndReached) {
+      cursor.Iterator.moveToNext();
+      currentStep += 1;
+    }
+    if (!cursorVisible) {
+      cursor.show();
+      cursorVisible = true;
+    } else {
+      cursor.update();
+    }
+  }
+
+  /// Picks the cursor step for a source measure and beat. When a measure is played more than once
+  /// (repeats), prefers the occurrence closest to the current position, looking forward first.
+  function findStep(measureIndex, beat) {
+    var best = -1, bestScore = Infinity;
+    for (var i = 0; i < steps.length; i++) {
+      var s = steps[i];
+      if (s.m !== measureIndex || s.b > beat + 1e-3) { continue; }
+      // Candidate: the last step at or before `beat` within this occurrence of the measure.
+      var next = steps[i + 1];
+      if (next && next.m === measureIndex && next.b <= beat + 1e-3) { continue; }
+      var distance = currentStep < 0 ? i : (i >= currentStep ? i - currentStep : (currentStep - i) * 4);
+      if (distance < bestScore) { bestScore = distance; best = i; }
+    }
+    if (best < 0) {
+      // Beat before the first note of the measure: use the measure's first step.
+      for (var j = 0; j < steps.length; j++) { if (steps[j].m === measureIndex) { return j; } }
+    }
+    return best;
+  }
+
+  function measureAtPoint(clientX, clientY) {
+    if (!osmd || !osmd.GraphicSheet) { return -1; }
+    var svg = document.querySelector("#sheet svg");
+    if (!svg) { return -1; }
+    var rect = svg.getBoundingClientRect();
+    var unit = 10 * osmd.zoom;
+    var x = (clientX - rect.left) / unit, y = (clientY - rect.top) / unit;
+    var list = osmd.GraphicSheet.MeasureList;
+    var best = -1, bestDist = Infinity;
+    for (var i = 0; i < list.length; i++) {
+      var staves = list[i] || [];
+      for (var s = 0; s < staves.length; s++) {
+        var gm = staves[s];
+        if (!gm || !gm.PositionAndShape) { continue; }
+        var ps = gm.PositionAndShape;
+        var left = ps.AbsolutePosition.x + ps.BorderLeft, right = ps.AbsolutePosition.x + ps.BorderRight;
+        var top = ps.AbsolutePosition.y + ps.BorderTop - 2, bottom = ps.AbsolutePosition.y + ps.BorderBottom + 2;
+        if (x >= left && x <= right) {
+          var dy = y < top ? top - y : (y > bottom ? y - bottom : 0);
+          if (dy < bestDist) { bestDist = dy; best = i; }
+        }
+      }
+    }
+    return bestDist <= 6 ? best : -1;
+  }
+
+  document.addEventListener("click", function (event) {
+    var m = measureAtPoint(event.clientX, event.clientY);
+    if (m >= 0) { post({ type: "tapMeasure", measureIndex: m }); }
+  });
+
+  window.PianoSheet = {
+    /// Loads and renders MusicXML text. Resolves to {measures, steps} or rejects with an error message.
+    load: async function (xmlText) {
+      document.getElementById("message").textContent = "";
+      try {
+        ensureOSMD();
+        await osmd.load(xmlText);
+        osmd.zoom = zoom;
+        osmd.render();
+        computeSteps();
+        currentStep = -1;
+        cursorVisible = false;
+        osmd.cursor.hide();
+        var result = { measures: osmd.Sheet.SourceMeasures.length, steps: steps.length };
+        post({ type: "loaded", measures: result.measures, steps: result.steps });
+        return result;
+      } catch (e) {
+        var message = (e && e.message) ? e.message : String(e);
+        document.getElementById("message").textContent = "Could not show this music: " + message;
+        post({ type: "error", message: message });
+        throw new Error(message);
+      }
+    },
+    /// Moves the cursor to (source measure index, beat in quarter notes) and scrolls it into view.
+    moveTo: function (measureIndex, beatInMeasure) {
+      var i = findStep(measureIndex, beatInMeasure || 0);
+      if (i >= 0) { goToStep(i); }
+      return i;
+    },
+    showCursor: function () {
+      if (!osmd) { return; }
+      if (currentStep < 0) { goToStep(0); } else { osmd.cursor.show(); cursorVisible = true; }
+    },
+    hideCursor: function () {
+      if (osmd) { osmd.cursor.hide(); cursorVisible = false; }
+    },
+    setZoom: function (z) {
+      zoom = Math.max(0.3, Math.min(3, z));
+      if (osmd && osmd.IsReadyToRender()) {
+        osmd.zoom = zoom;
+        osmd.render();
+        if (cursorVisible) { osmd.cursor.show(); }
+      }
+      return zoom;
+    },
+    info: function () {
+      return { steps: steps.length, currentStep: currentStep, zoom: zoom,
+               cursor: currentStep >= 0 ? steps[currentStep] : null };
+    }
+  };
+
+  post({ type: "ready" });
+})();
+</script>
+</body>
+</html>
