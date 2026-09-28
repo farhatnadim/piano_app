@@ -15,3 +15,6 @@ Package.resolved
 
 # macOS
 .DS_Store
+
+# Claude Code local worktrees
+.claude/worktrees/
