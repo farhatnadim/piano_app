@@ -168,4 +168,36 @@ final class PacingControllerTests: XCTestCase {
         XCTAssertEqual(pacing.quantizedRate(atMost: 0.1), 0.25)
         XCTAssertEqual(pacing.quantizedRate(atMost: 1.6), 1.0)     // capped by maxRate
     }
+
+    /// The video is parked well past the child, who starts playing ~7 s earlier in the piece:
+    /// the video must come back to them rather than wait forever.
+    func testFollowMeRewindsWhenChildStartsFarBehindTheVideo() {
+        let sync = SyncMap(bpm: 120, offset: 0)          // 0.5 s per beat
+        let score = TestSupport.melodyScore()
+        let track = FollowTrack.fromScore(score, syncMap: sync)
+        let follower = ScoreFollower(track: track)
+        let pacing = PacingController()
+        var player = FakePlayer(time: sync.videoTime(forBeat: 30), playing: false)
+        pacing.setMode(.followMe, now: 0)
+        follower.reset(toVideoTime: player.time)
+        var now = 0.0
+        var lastOnset: Double?
+        for i in 16..<24 {
+            follower.process(TestSupport.onset(score.events[i].pitches, at: now, seed: i), at: now)
+            lastOnset = now
+            for _ in 0..<10 {
+                let input = PacingInput(now: now, videoTime: player.time, videoIsPlaying: player.playing,
+                                        currentRate: player.rate, lastOnsetClockTime: lastOnset,
+                                        follower: follower.state, childVideoTime: follower.estimatedVideoTime(at: now),
+                                        expectedGapSeconds: follower.expectedGapSeconds())
+                player.apply(pacing.update(input))
+                player.advance(0.05)
+                now += 0.05
+            }
+        }
+        XCTAssertEqual(follower.state.eventIndex, 23)
+        XCTAssertTrue(player.log.contains { if case .seek = $0 { return true } else { return false } })
+        XCTAssertEqual(player.time, follower.estimatedVideoTime(at: now), accuracy: 1.2)
+        XCTAssertTrue(player.playing)
+    }
 }

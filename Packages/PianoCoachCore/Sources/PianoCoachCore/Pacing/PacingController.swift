@@ -19,6 +19,9 @@ public struct PacingConfiguration: Sendable, Equatable {
     public var seekLag: Double = 2.5
     /// After the follower detects a jump (e.g. starting the measure again), move the video if it is off by more than this.
     public var jumpSeekThreshold: Double = 1.5
+    /// If the video is this far ahead of a child who is actively playing (they went back further than
+    /// the follower flagged as a jump), move the video back to them.
+    public var rewindLead: Double = 3.0
     /// Only seek when the follower is at least this confident.
     public var minConfidenceToSeek: Double = 0.5
     /// Land this far before the child's position when seeking.
@@ -162,8 +165,9 @@ public final class PacingController {
         var lead = videoTime - child
 
         // 1. Far off (the child skipped ahead, or started the passage again): move the video to the child.
+        let playingNow = now - (input.lastOnsetClockTime ?? -.infinity) < c.silenceTimeout
         if follower.confidence >= c.minConfidenceToSeek, now - lastSeekTime >= c.minSeekInterval,
-           lead < -c.seekLag || (follower.jumped && abs(lead) > c.jumpSeekThreshold) {
+           lead < -c.seekLag || (follower.jumped && abs(lead) > c.jumpSeekThreshold) || (playingNow && lead > c.rewindLead) {
             let target = max(0, child - c.seekPreroll)
             commands.append(.seek(to: target))
             lastSeekTime = now

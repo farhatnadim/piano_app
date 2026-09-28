@@ -174,4 +174,18 @@ final class ScoreFollowerTests: XCTestCase {
         let merged = TrackRecorder.merge(base: track, with: replacement, replacing: 1.8...3.0)
         XCTAssertEqual(merged.events.map(\.videoTime), [1.0, 2.5])
     }
+
+    func testStartingFarFromTheResetPointIsAJump() {
+        let follower = ScoreFollower(track: track)
+        follower.reset(toVideoTime: sync.videoTime(forBeat: 12))
+        var clock = 0.0
+        var sawJump = false
+        for i in 0..<4 {
+            let s = follower.process(TestSupport.onset(score.events[i].pitches, at: clock, seed: i), at: clock)
+            sawJump = sawJump || s.jumped
+            clock += 0.6
+        }
+        XCTAssertTrue(sawJump)
+        XCTAssertEqual(follower.state.eventIndex, 3)
+    }
 }

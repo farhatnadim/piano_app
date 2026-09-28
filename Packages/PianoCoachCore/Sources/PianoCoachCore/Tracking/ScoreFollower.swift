@@ -61,6 +61,8 @@ public final class ScoreFollower {
     private var belief: [Double]
     private var tempo = TempoRatioEstimator()
     private var measureStart: [Bool]
+    /// The event the child was expected to start with after the last reset.
+    private var expectedStartIndex = 0
 
     public init(track: FollowTrack, configuration: FollowerConfiguration = FollowerConfiguration()) {
         self.track = track
@@ -98,6 +100,7 @@ public final class ScoreFollower {
 
     private func reset(toEventIndex next: Int, videoTime: Double) {
         for i in belief.indices { belief[i] = 0 }
+        expectedStartIndex = next
         let s = next - 1                      // state "last played = next - 1"
         belief[s + 1] = 0.8
         if s - 1 >= -1 { belief[s] += 0.1 } else { belief[s + 1] += 0.1 }
@@ -230,8 +233,10 @@ public final class ScoreFollower {
                 tempo.restartSegment()
             }
             if bestEvent != previous || !wasStarted {
-                let sequential = wasStarted && (bestEvent == previous + 1 || bestEvent == previous + 2)
-                if wasStarted && !sequential {
+                let sequential = wasStarted
+                    ? (bestEvent == previous + 1 || bestEvent == previous + 2)
+                    : abs(bestEvent - expectedStartIndex) <= 2
+                if !sequential {
                     newState.jumped = true
                     tempo.restartSegment()
                 }
