@@ -10,6 +10,17 @@ enum SheetContent: Equatable {
     case image(URL)
 }
 
+/// The two ways to practise a piece.
+enum PracticeTab: String, CaseIterable, Identifiable {
+    /// The falling-notes game.
+    case game
+    /// The YouTube video, paced by the coach.
+    case video
+
+    var id: String { rawValue }
+    var displayName: String { self == .game ? "Game" : "Video" }
+}
+
 /// App-wide state: the library of pieces, the open piece, and the shared audio/video/coach objects.
 @MainActor
 @Observable
@@ -28,6 +39,8 @@ final class AppModel {
     let player: YouTubePlayerController
     let coach: CoachEngine
     let voice: VoiceCommandListener
+    let sound: GameSoundPlayer
+    let game: GameController
 
     // MARK: Open piece
 
@@ -43,6 +56,10 @@ final class AppModel {
     @ObservationIgnored private var toastTask: Task<Void, Never>?
     /// Measures of the open piece's score (for sync setup), if it has notes.
     private(set) var openScore: Score?
+    /// Game or video.
+    var practiceTab: PracticeTab = .game {
+        didSet { if oldValue != practiceTab { practiceTabChanged() } }
+    }
 
     var openPiece: Piece? {
         guard let id = openPieceID else { return nil }
@@ -56,6 +73,8 @@ final class AppModel {
         player = YouTubePlayerController()
         coach = CoachEngine(player: player, audio: audio, midi: midi)
         voice = VoiceCommandListener(audio: audio)
+        sound = GameSoundPlayer()
+        game = GameController(coach: coach, sound: sound)
 
         let fm = FileManager.default
         let base = (try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
@@ -69,6 +88,7 @@ final class AppModel {
         pieces = sortedPieces(store?.loadPieces() ?? [])
 
         coach.onTrackLearned = { [weak self] track in self?.saveLearnedTrack(track) }
+        game.onFinished = { [weak self] result in self?.recordGame(result) }
         voice.onCommand = { [weak self] command in self?.handle(command) }
         // While the video is audible, the microphone also hears the video (a teacher saying "stop",
         // "again"…), so plain commands are only trusted when the video is quiet.
@@ -170,14 +190,18 @@ final class AppModel {
         coach.attach(score: openScore, syncMap: piece.syncMap, learned: learned, manualRate: piece.manualRate)
         coach.loop = piece.loop
         player.load(videoID: piece.videoID, startTime: piece.resumeTime, muted: false)
+        loadGame(for: piece, learned: learned)
         applySettings()
-        var p = piece
-        p.lastPracticedAt = Date()
-        update(p)
+        if var p = openPiece {            // re-read: loadGame may have stored the difficulty
+            p.lastPracticedAt = Date()
+            update(p)
+        }
+        if practiceTab == .video { practiceTabChanged() } else { practiceTab = game.chart == nil ? .video : .game }
     }
 
     func closePiece() {
         guard var piece = openPiece else { return }
+        game.stop()
         coach.cancelLearning()
         coach.setMode(.off)
         coach.stopListening()
@@ -272,6 +296,55 @@ final class AppModel {
         loadSheetAndScore(for: piece)
         let learned = piece.hasLearnedTrack ? store?.loadTrack(forPiece: piece.id) : nil
         coach.attach(score: openScore, syncMap: piece.syncMap, learned: learned, manualRate: piece.manualRate)
+        loadGame(for: piece, learned: learned)
+    }
+
+    // MARK: - Game
+
+    /// Builds the game's notes: exact from sheet music when there is some, otherwise worked out from
+    /// what the coach heard while listening to the video.
+    private func loadGame(for piece: Piece, learned: FollowTrack?) {
+        var chart: NoteChart?
+        if let score = openScore {
+            chart = NoteChart.from(score: score, title: piece.title)
+        } else if let learned {
+            chart = NoteChart.fromListening(track: learned, title: piece.title)
+        }
+        game.load(chart: chart, progress: piece.game)
+        if let chart, var p = pieces.first(where: { $0.id == piece.id }) {
+            let level = ChartDifficulty.estimate(chart).level
+            if p.difficulty != level {
+                p.difficulty = level
+                update(p)
+            }
+        }
+    }
+
+    /// Saves a finished game into the piece's progress and returns the level change to celebrate.
+    private func recordGame(_ result: GameResult) -> LevelChange? {
+        guard var piece = openPiece else { return nil }
+        var progress = piece.game ?? GameProgress(speed: result.startSpeed)
+        let change = progress.record(result)
+        piece.game = progress
+        update(piece)
+        return change
+    }
+
+    /// Makes the game build its notes by listening to the video (the coach's learning pass).
+    func buildGameByListening() {
+        practiceTab = .video
+        coach.startLearning()
+    }
+
+    private func practiceTabChanged() {
+        switch practiceTab {
+        case .game:
+            coach.cancelLearning()
+            coach.setMode(.off)
+            player.pause()
+        case .video:
+            game.stop()
+        }
     }
 
     /// Sets the video's tempo (quarter notes per minute) and keeps the sync's start point.
@@ -336,6 +409,7 @@ final class AppModel {
             try store?.saveTrack(track, forPiece: piece.id)
             piece.hasLearnedTrack = true
             update(piece)
+            if openScore == nil { loadGame(for: piece, learned: track) }
         } catch {
             libraryError = "Couldn't save what the coach learned: \(error.localizedDescription)"
         }
@@ -346,7 +420,10 @@ final class AppModel {
         var p = piece
         p.hasLearnedTrack = false
         update(p)
-        if openPieceID == p.id { coach.forgetLearnedTrack() }
+        if openPieceID == p.id {
+            coach.forgetLearnedTrack()
+            if openScore == nil { game.load(chart: nil, progress: p.game) }
+        }
     }
 
     // MARK: - Practice preferences

@@ -79,6 +79,10 @@ final class CoachEngine {
 
     /// Called when a new learned track should be saved (the app persists it).
     @ObservationIgnored var onTrackLearned: ((FollowTrack) -> Void)?
+    /// Receives every note or chord heard (microphone or MIDI) with its clock time — used by the game.
+    @ObservationIgnored var noteObserver: ((NoteOnset, Double) -> Void)?
+    /// Receives MIDI keys going down (`true`) and up (`false`) — used to light keys in the game.
+    @ObservationIgnored var keyObserver: ((Int, Bool) -> Void)?
 
     // MARK: Collaborators
 
@@ -242,6 +246,9 @@ final class CoachEngine {
                 self.midi.onNoteOn = { [weak self] note, velocity, time in
                     Task { @MainActor in self?.midiNoteOn(note: note, velocity: velocity, time: time) }
                 }
+                self.midi.onNoteOff = { [weak self] note, _ in
+                    Task { @MainActor in self?.keyObserver?(note, false) }
+                }
                 do {
                     try self.midi.start()
                     self.isListening = true
@@ -259,6 +266,7 @@ final class CoachEngine {
     func stopListening() {
         audio.setChunkHandler(nil)
         midi.onNoteOn = nil
+        midi.onNoteOff = nil
         midi.stop()
         isListening = false
         inputLevel = 0
@@ -289,6 +297,7 @@ final class CoachEngine {
     private func midiNoteOn(note: Int, velocity: Int, time: Double) {
         guard noteSource == .midiKeyboard else { return }
         inputLevel = Float(velocity) / 127
+        keyObserver?(note, true)
         if let finished = grouper.noteOn(midi: note, velocity: velocity, time: time) {
             handle(finished, at: finished.time)
         }
@@ -305,6 +314,7 @@ final class CoachEngine {
         lastOnsetClock = max(lastOnsetClock ?? clockTime, clockTime)
         heardCount &+= 1
         lastHeard = onset.midiPitches.map { $0.map(Pitch.name(midi:)).joined(separator: " ") } ?? "♪"
+        noteObserver?(onset, clockTime)
 
         if isLearning, let recorder {
             if videoClock.isPlaying(at: clockTime), let videoTime = videoClock.videoTime(at: clockTime) {

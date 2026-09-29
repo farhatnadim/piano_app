@@ -28,6 +28,7 @@ final class MIDIInputManager: @unchecked Sendable {
     /// Guards the handler and names; held only briefly.
     private let lock = NSLock()
     private var noteHandler: (@Sendable (_ note: Int, _ velocity: Int, _ time: Double) -> Void)?
+    private var noteOffHandler: (@Sendable (_ note: Int, _ time: Double) -> Void)?
     private var names: [String] = []
 
     /// Serialises setup; never taken on the receive thread.
@@ -46,6 +47,12 @@ final class MIDIInputManager: @unchecked Sendable {
     var onNoteOn: (@Sendable (_ note: Int, _ velocity: Int, _ time: Double) -> Void)? {
         get { lock.withLock { noteHandler } }
         set { lock.withLock { noteHandler = newValue } }
+    }
+
+    /// Called for every note-off (including note-on with velocity 0) with its time in `MonotonicClock` seconds.
+    var onNoteOff: (@Sendable (_ note: Int, _ time: Double) -> Void)? {
+        get { lock.withLock { noteOffHandler } }
+        set { lock.withLock { noteOffHandler = newValue } }
     }
 
     /// Names of the connected keyboards (online sources other than the network session).
@@ -155,7 +162,8 @@ final class MIDIInputManager: @unchecked Sendable {
     // MARK: - Receiving (CoreMIDI's receive thread)
 
     private func receive(_ eventList: UnsafePointer<MIDIEventList>) {
-        guard let handler = onNoteOn else { return }
+        let (onHandler, offHandler) = lock.withLock { (noteHandler, noteOffHandler) }
+        guard onHandler != nil || offHandler != nil else { return }
         let now = MonotonicClock.now()
         for packet in eventList.unsafeSequence() {
             // A timestamp of 0 means "now"; ignore implausible ones from misbehaving drivers.
@@ -171,16 +179,19 @@ final class MIDIInputManager: @unchecked Sendable {
                 let size = Self.umpWordCounts[type]
                 let status = (word >> 16) & 0xF0
                 let channel = (word >> 16) & 0x0F
-                if status == 0x90 && channel != Self.drumChannel {
+                if (status == 0x90 || status == 0x80) && channel != Self.drumChannel {
                     let note = Int((word >> 8) & 0x7F)
                     if type == 0x2 {
                         // MIDI 1.0 channel voice: a note-on with velocity 0 is a note-off.
                         let velocity = Int(word & 0x7F)
-                        if velocity > 0 { handler(note, velocity, time) }
+                        if status == 0x90 && velocity > 0 { onHandler?(note, velocity, time) } else { offHandler?(note, time) }
                     } else if type == 0x4 && index + 1 < words.endIndex {
                         // MIDI 2.0 channel voice (should the system deliver it anyway): 16-bit velocity.
-                        let velocity = Int(words[index + 1] >> 25)
-                        handler(note, max(1, velocity), time)
+                        if status == 0x90 {
+                            onHandler?(note, max(1, Int(words[index + 1] >> 25)), time)
+                        } else {
+                            offHandler?(note, time)
+                        }
                     }
                 }
                 index += size

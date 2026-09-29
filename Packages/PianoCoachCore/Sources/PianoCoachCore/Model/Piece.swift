@@ -79,12 +79,16 @@ public struct Piece: Codable, Hashable, Identifiable, Sendable {
     public var resumeTime: Double
     /// Manual playback-rate preference used when the coach is off (1 = normal).
     public var manualRate: Double
+    /// Progress in the falling-notes game (level, bests, history). Nil until the first game.
+    public var game: GameProgress?
+    /// 1...5 difficulty of the song's notes, once known (for the library and suggestions).
+    public var difficulty: Int?
 
     public init(id: UUID = UUID(), title: String, videoID: String, createdAt: Date = Date(),
                 lastPracticedAt: Date? = nil, sheet: SheetAttachment? = nil, displaySheet: SheetAttachment? = nil,
                 videoBPM: Double? = nil, syncMap: SyncMap? = nil, hasLearnedTrack: Bool = false,
                 loop: LoopRange? = nil, preferredMode: CoachMode = .waitForMe, resumeTime: Double = 0,
-                manualRate: Double = 1) {
+                manualRate: Double = 1, game: GameProgress? = nil, difficulty: Int? = nil) {
         self.id = id
         self.title = title
         self.videoID = videoID
@@ -99,6 +103,8 @@ public struct Piece: Codable, Hashable, Identifiable, Sendable {
         self.preferredMode = preferredMode
         self.resumeTime = resumeTime
         self.manualRate = manualRate
+        self.game = game
+        self.difficulty = difficulty
     }
 
     /// The attachment to display as sheet music, if any.
