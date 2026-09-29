@@ -68,3 +68,53 @@ jobs:
           find "$APP" -name "sheet.html" | grep -q WebAssets
           find "$APP" -name "youtube_player.html" | grep -q WebAssets
           find "$APP" -name "opensheetmusicdisplay.min.js" | grep -q WebAssets
+
+  ipad-screenshots:
+    name: iPad screenshots
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pick an iPad simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = [d for runtime, ds in json.load(sys.stdin)["devices"].items() if "iOS" in runtime for d in ds]
+          ipads = [d for d in devices if d["name"].startswith("iPad Pro") and "13" in d["name"]] or [d for d in devices if d["name"].startswith("iPad")]
+          print(ipads[-1]["udid"])')
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl list devices | grep "$UDID"
+      - name: Build for the simulator
+        run: |
+          set -o pipefail
+          xcodebuild build -project PianoCoach.xcodeproj -scheme PianoCoach -configuration Debug \
+            -destination "id=$UDID" -derivedDataPath build CODE_SIGNING_ALLOWED=NO > build.log 2>&1 \
+            || { grep -E "error:" build.log | sort -u | head -100; tail -30 build.log; exit 1; }
+          APP=build/Build/Products/Debug-iphonesimulator/PianoCoach.app
+          echo "APP=$APP" >> "$GITHUB_ENV"
+          echo "Scene manifest:"; plutil -extract UIApplicationSceneManifest xml1 -o - "$APP/Info.plist"
+      - name: Take screenshots
+        run: |
+          mkdir -p shots
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" "$APP"
+          BUNDLE=com.farhatnadim.PianoCoach
+          shoot() {
+            name=$1; shift
+            xcrun simctl terminate "$UDID" "$BUNDLE" 2>/dev/null || true
+            xcrun simctl launch "$UDID" "$BUNDLE" "$@"
+            sleep 9
+            xcrun simctl io "$UDID" screenshot "shots/$name.png"
+            sips -s format jpeg -s formatOptions 70 -Z 1600 "shots/$name.png" --out "shots/$name.jpg" > /dev/null
+          }
+          shoot 1-keys -screenshot-demo keys
+          shoot 2-notes -screenshot-demo notes
+          shoot 3-start -screenshot-demo start
+          shoot 4-keys-landscape -screenshot-demo keys landscape
+          shoot 5-notes-landscape -screenshot-demo notes landscape
+          shoot 6-library
+          ls -la shots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ipad-screenshots
+          path: shots/*.jpg

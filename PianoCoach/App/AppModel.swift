@@ -1,6 +1,9 @@
 import Foundation
 import Observation
 import PianoCoachCore
+#if os(iOS)
+import UIKit
+#endif
 
 /// Sheet music ready to display for the open piece.
 enum SheetContent: Equatable {
@@ -97,6 +100,9 @@ final class AppModel {
             return player.isPlaying && !player.isMuted
         }
         applySettings()
+        #if DEBUG
+        startScreenshotDemoIfRequested()
+        #endif
     }
 
     private func sortedPieces(_ list: [Piece]) -> [Piece] {
@@ -485,6 +491,42 @@ final class AppModel {
         }
         showToast(command.confirmation)
     }
+
+    #if DEBUG
+    /// Screenshot mode used by CI: `-screenshot-demo keys|notes|start [landscape]` opens the built-in demo
+    /// song in the game (without voice commands, so no permission prompts cover the screen).
+    private func startScreenshotDemoIfRequested() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flag = arguments.firstIndex(of: "-screenshot-demo") else { return }
+        let scene = arguments.dropFirst(flag + 1).joined(separator: " ")
+        settings.voiceCommandsEnabled = false
+        let piece: Piece
+        if let existing = pieces.first(where: { $0.title == DemoSong.title }) {
+            piece = existing
+        } else {
+            piece = Piece(title: DemoSong.title, videoID: "Ode2JoyDemo")
+            pieces.insert(piece, at: 0)
+            persist()
+        }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard let self else { return }
+            #if os(iOS)
+            if scene.contains("landscape"),
+               let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight)) { _ in }
+            }
+            #endif
+            self.openPiece(piece)
+            self.game.load(chart: DemoSong.chart, progress: GameProgress(speed: 0.7))
+            self.practiceTab = .game
+            self.game.display = scene.contains("notes") ? .notes : .keys
+            guard !scene.contains("start") else { return }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            self.game.playDemo()
+        }
+    }
+    #endif
 
     func showToast(_ text: String) {
         toast = text
