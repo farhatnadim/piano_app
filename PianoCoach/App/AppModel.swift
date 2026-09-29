@@ -70,6 +70,12 @@ final class AppModel {
 
         coach.onTrackLearned = { [weak self] track in self?.saveLearnedTrack(track) }
         voice.onCommand = { [weak self] command in self?.handle(command) }
+        // While the video is audible, the microphone also hears the video (a teacher saying "stop",
+        // "again"…), so plain commands are only trusted when the video is quiet.
+        voice.requireWakeWordWhen = { [weak self] in
+            guard let player = self?.player else { return false }
+            return player.isPlaying && !player.isMuted
+        }
         applySettings()
     }
 
@@ -158,8 +164,8 @@ final class AppModel {
         if openPieceID == piece.id { return }
         if openPieceID != nil { closePiece() }
         openPieceID = piece.id
-        showSheet = false
         loadSheetAndScore(for: piece)
+        showSheet = sheetContent != nil
         let learned = piece.hasLearnedTrack ? store?.loadTrack(forPiece: piece.id) : nil
         coach.attach(score: openScore, syncMap: piece.syncMap, learned: learned, manualRate: piece.manualRate)
         coach.loop = piece.loop

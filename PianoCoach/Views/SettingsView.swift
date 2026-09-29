@@ -5,6 +5,9 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var confirmReset = false
+    #if os(iOS)
+    @State private var showBluetoothPairing = false
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -37,6 +40,16 @@ struct SettingsView: View {
                     SettingSlider(title: "Sensitivity", value: binding(\.sensitivity), range: 0...1, step: 0.05,
                                   valueText: sensitivityText(settings.sensitivity),
                                   minimumLabel: "Clear notes", maximumLabel: "Soft notes")
+                } else {
+                    #if os(iOS)
+                    Button { showBluetoothPairing = true } label: {
+                        Label("Connect a Bluetooth keyboard…", systemImage: "dot.radiowaves.left.and.right")
+                    }
+                    #else
+                    Text("USB keyboards work right away. Pair Bluetooth keyboards in the Audio MIDI Setup app (MIDI Studio, then Bluetooth).")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    #endif
                 }
             } header: {
                 Text("Hearing the piano")
@@ -77,7 +90,7 @@ struct SettingsView: View {
             } header: {
                 Text("Voice commands")
             } footer: {
-                Text("Your child can say “slower”, “again” or “measure twelve”. With “Only after Coach” on, the app reacts only to “Coach, slower” and so on — useful if it reacts to normal talking.")
+                Text("Your child can say “slower”, “again” or “measure twelve”. While the video's sound is playing, start with “Coach” (“Coach, pause”) so the teacher in the video can't give commands. With “Only after Coach” on, the app always waits for “Coach” — useful if it reacts to normal talking.")
             }
 
             Section("Sheet music") {
@@ -99,6 +112,11 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        #if os(iOS)
+        .sheet(isPresented: $showBluetoothPairing) {
+            BluetoothMIDIPairingView()
+        }
+        #endif
         .confirmationDialog("Reset the coach settings?", isPresented: $confirmReset, titleVisibility: .visible) {
             Button("Reset", role: .destructive) {
                 model.settings.resetCoachDefaults()

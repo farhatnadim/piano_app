@@ -99,7 +99,10 @@ final class CoachEngine {
     @ObservationIgnored private var lastLoopJump: Double = -.infinity
     /// Where the child last (re)started — "again" returns here.
     @ObservationIgnored private var practiceStartTime: Double = 0
-    @ObservationIgnored private var manualRate: Double = 1
+    /// Speed used when the coach is off (observed so speed controls update).
+    private(set) var manualRate: Double = 1
+    /// Fastest speed the coach may use while following (observed copy of the pacing limit).
+    private(set) var followMaxRate: Double = 1
     @ObservationIgnored private var mutedByCoach = false
 
     init(player: YouTubePlayerController, audio: AudioInputHub, midi: MIDIInputManager) {
@@ -230,7 +233,7 @@ final class CoachEngine {
                 let worker = self.analysis
                 self.audio.setChunkHandler { chunk in worker.process(chunk) }
                 do {
-                    try self.audio.start(voiceProcessing: self.echoCancellation)
+                    try self.audio.start(voiceProcessing: self.echoCancellation && !self.isLearning)
                     self.isListening = true
                 } catch {
                     self.listeningError = "Couldn't start the microphone: \(error.localizedDescription)"
@@ -491,13 +494,14 @@ final class CoachEngine {
 
     /// The speed used when the coach is off (or the fastest the coach may go when following).
     var speedSetting: Double {
-        mode == .followMe ? pacing.configuration.maxRate : manualRate
+        mode == .followMe ? followMaxRate : manualRate
     }
 
     func setSpeed(_ rate: Double) {
         let nearest = availableRates.min { abs($0 - rate) < abs($1 - rate) } ?? 1
         if mode == .followMe {
             pacing.configuration.maxRate = nearest
+            followMaxRate = nearest
         } else {
             manualRate = nearest
             player.setRate(nearest)
@@ -520,6 +524,7 @@ final class CoachEngine {
         pacing.configuration.rates = availableRates
         if !allowFasterThanNormal { pacing.configuration.maxRate = min(pacing.configuration.maxRate, 1) }
         else if pacing.configuration.maxRate <= 1 { pacing.configuration.maxRate = 1.25 }
+        followMaxRate = pacing.configuration.maxRate
     }
 
     // MARK: - Sound
@@ -545,7 +550,11 @@ final class CoachEngine {
         player.setMuted(false)
         mutedByCoach = false
         player.setRate(1)
-        if !isListening { startListening() }
+        if isListening && echoCancellation {
+            restartListening()          // echo cancellation would remove the very sound we want to learn
+        } else if !isListening {
+            startListening()
+        }
         player.play()
     }
 
@@ -562,6 +571,7 @@ final class CoachEngine {
         self.recorder = nil
         if let previous = noteSourceBeforeLearning, previous != noteSource { noteSource = previous }
         noteSourceBeforeLearning = nil
+        if isListening && echoCancellation && noteSource == .microphone { restartListening() }
         guard let range = recorder.coveredRange, newPart.events.count >= 4 else {
             notice = "The coach didn't hear enough notes. Turn the video's volume up and try again."
             return nil
@@ -580,6 +590,9 @@ final class CoachEngine {
         recorder = nil
         player.pause()
         notice = nil
+        if let previous = noteSourceBeforeLearning, previous != noteSource { noteSource = previous }
+        noteSourceBeforeLearning = nil
+        if isListening && echoCancellation && noteSource == .microphone { restartListening() }
     }
 
     /// Forgets the learned track (the app deletes the saved file).

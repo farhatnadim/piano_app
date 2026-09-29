@@ -1,15 +1,45 @@
 #if os(iOS)
-import CoreAudioKit
 import SwiftUI
+#if canImport(CoreAudioKit)
+import CoreAudioKit
+#endif
 
-/// Apple's screen for finding and connecting Bluetooth MIDI keyboards. Push it inside a
-/// `NavigationStack` (or present it in one). A connected keyboard shows up as a MIDI source, which
-/// `MIDIInputManager` picks up by itself. Needs `NSBluetoothAlwaysUsageDescription` in Info.plist.
-struct BluetoothMIDIPairingView: UIViewControllerRepresentable {
+/// Apple's Bluetooth MIDI pairing screen, for a parent to connect a Bluetooth keyboard. Present it in a
+/// sheet. A paired keyboard becomes a MIDI source, which `MIDIInputManager` connects by itself.
+/// Needs `NSBluetoothAlwaysUsageDescription` in Info.plist.
+struct BluetoothMIDIPairingView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            central
+                .navigationTitle("Bluetooth Keyboard")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+        }
+    }
+
+    @ViewBuilder private var central: some View {
+        #if canImport(CoreAudioKit)
+        BluetoothMIDICentral()
+        #else
+        Text("Bluetooth keyboards can't be paired on this device.")
+            .foregroundStyle(.secondary)
+        #endif
+    }
+}
+
+#if canImport(CoreAudioKit)
+private struct BluetoothMIDICentral: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> CABTMIDICentralViewController {
         CABTMIDICentralViewController()
     }
 
-    func updateUIViewController(_ uiViewController: CABTMIDICentralViewController, context: Context) {}
+    func updateUIViewController(_ controller: CABTMIDICentralViewController, context: Context) {}
 }
+#endif
 #endif

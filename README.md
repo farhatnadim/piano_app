@@ -41,13 +41,13 @@ If you prefer generating the project, `project.yml` describes the same project f
 2. Press **Wait for me** and let your child play along. The video mutes while the coach listens, so
    the microphone hears the piano rather than the video. Change this in Settings if you use
    headphones or a MIDI keyboard.
-3. For **Follow me**, open the piece's setup (slider icon) and choose one:
-   - **Teach the coach this song**: the video plays once with the sound on while the coach listens
+3. For **Follow me**, tap **Set up** and choose one:
+   - **Teach the coach** → *Start listening*: the video plays once with the sound on while the coach listens
      (keep the room quiet and the volume up). Done.
    - **Sheet music**: import a MusicXML file (MuseScore → *Export → MusicXML*) or a MIDI file, then
-     sync it to the video. Either press *"The first note is here"* when the first note plays and
-     adjust the tempo, or use *Tap along*, tapping on the first beat of every measure while the video
-     plays. PDFs and photos can be shown but not followed.
+     sync it to the video. Either press *The first note is here* when the first note plays and
+     set the tempo, or use *Tap along with the video…*, tapping on the first beat of every measure while
+     the video plays. PDFs and photos can be shown but not followed.
 4. Say **"show the music"** or tap **Music** to see the sheet beside or below the video.
 
 Try it with `Samples/Ode to Joy (easy).musicxml` and any easy "Ode to Joy" piano tutorial.
@@ -63,7 +63,9 @@ Try it with `Samples/Ode to Joy (easy).musicxml` and any easy "Ode to Joy" piano
 | | | | measure twelve / bar 4 | |
 | | | | loop this / stop looping | |
 
-In a noisy room, turn on *Settings → Only listen after "Coach"* and say "Coach, slower".
+While the video's own sound is playing, start commands with "Coach" ("Coach, pause"), so a
+teacher talking in the video can't trigger them. When the video is muted (the default while the
+coach listens), plain commands work. In a noisy room, turn on *Settings → Only after "Coach"*.
 
 ## Tips
 

@@ -24,6 +24,9 @@ final class VoiceCommandListener {
     private(set) var errorMessage: String?
     /// Only act on commands that follow a wake word ("hey coach, slower").
     var requireWakeWord = false
+    /// Extra condition under which the wake word is required, checked for every transcript — e.g. while
+    /// the video's own sound is playing, so a teacher saying "stop" in the video isn't taken as a command.
+    @ObservationIgnored var requireWakeWordWhen: (() -> Bool)?
     /// Receives each recognised command, on the main actor.
     @ObservationIgnored var onCommand: ((VoiceCommand) -> Void)?
 
@@ -225,7 +228,7 @@ final class VoiceCommandListener {
         consecutiveFailures = 0
         if errorMessage != nil { errorMessage = nil }
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let command = words.isEmpty ? nil : VoiceCommandParser(requireWakeWord: requireWakeWord).parse(words)
+        let command = words.isEmpty ? nil : VoiceCommandParser(requireWakeWord: requireWakeWord || (requireWakeWordWhen?() ?? false)).parse(words)
         if !words.isEmpty {
             lastHeardAt = MonotonicClock.now()
             showCaption(words)

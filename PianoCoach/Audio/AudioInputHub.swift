@@ -1,15 +1,15 @@
 import AVFoundation
 import Foundation
 
-/// Seconds on the host's monotonic clock (the same timebase as `AVAudioTime.hostTime` and CoreMIDI
-/// timestamps). Every timestamp the coach compares — onsets, MIDI notes, player reports, timers — uses this clock.
+/// Seconds on the host's monotonic clock (the timebase of `AVAudioTime.hostTime` and CoreMIDI timestamps).
+/// Every timestamp the coach compares — onsets, MIDI notes, player reports, timers — uses this clock.
 enum MonotonicClock {
     static func now() -> Double {
-        AVAudioTime.seconds(forHostTime: mach_absolute_time())
+        seconds(forHostTime: mach_absolute_time())
     }
 
-    /// Converts a host time (`mach_absolute_time` units, e.g. a `MIDITimeStamp`) to clock seconds.
-    static func seconds(hostTime: UInt64) -> Double {
+    /// Converts a host time (`mach_absolute_time` ticks, as in `AVAudioTime` and `MIDITimeStamp`).
+    static func seconds(forHostTime hostTime: UInt64) -> Double {
         AVAudioTime.seconds(forHostTime: hostTime)
     }
 }
@@ -26,388 +26,342 @@ struct AudioChunk: Sendable {
 /// Owns the microphone. One AVAudioEngine input tap feeds both the note analyser (mono float
 /// chunks) and speech recognition (the original PCM buffers).
 ///
-/// The handlers run on the audio tap's thread: they must be quick, hand work off to their own
-/// queues and not call back into the hub. The tap and notification closures are created in this
-/// non-isolated class on purpose — a closure formed in a `@MainActor` context would be main-actor
-/// isolated and trap when AVFoundation calls it off the main thread.
+/// The handlers run on the audio tap's thread: they must be quick and hand work off to their own
+/// queues. The tap and notification closures are `@Sendable` and formed in this non-isolated class on
+/// purpose — a closure formed in a `@MainActor` context would be main-actor isolated and trap when
+/// AVFoundation calls it off the main thread.
 ///
-/// When capture stops by itself (a route or format change, a phone call, the media services
-/// restarting, the app coming back from the background) the engine is rebuilt and restarted.
-/// Restarts are debounced, skipped while the engine is still running and limited in number, so a
-/// device that keeps reconfiguring can't cause a restart loop.
+/// When the audio hardware changes underneath it (a new route or sample rate, an interruption ending,
+/// media services resetting) the engine restarts itself, at most a few times in a row.
 final class AudioInputHub: @unchecked Sendable {
     enum HubError: LocalizedError {
         case noInput
         case permissionDenied
-        case keepsStopping
+        case stopped
 
         var errorDescription: String? {
             switch self {
             case .noInput: return "No microphone is available."
             case .permissionDenied: return "Microphone access is turned off. You can allow it in Settings."
-            case .keepsStopping: return "The microphone keeps stopping. Check the audio devices and try again."
+            case .stopped: return "The microphone stopped and couldn't be restarted."
             }
         }
     }
 
-    // Handlers. `handlerLock` is never held while calling into AVAudioEngine, so the tap can't
-    // deadlock with start/stop.
-    private let handlerLock = NSLock()
+    /// What asks the engine to restart.
+    private enum Trigger: Sendable {
+        case configurationChange(ObjectIdentifier)
+        case interruptionBegan
+        case interruptionEnded
+        case mediaServicesReset
+        case retry
+    }
+
+    private enum Outcome {
+        case none
+        case restarted(Double)
+        case failed(Error)
+    }
+
+    private static let restartDelay = 0.25
+    private static let retryDelay = 1.0
+    private static let maxRestarts = 4
+    private static let restartWindow = 20.0
+
+    /// Serialises engine control (start, stop, restarts). Never taken on the tap thread, so stopping the
+    /// engine can't wait for a tap block that is itself waiting for this lock.
+    private let controlLock = NSLock()
+    // Guarded by `controlLock`.
+    private var engine = AVAudioEngine()
+    private var wanted = false
+    private var useVoiceProcessing = false
+    private var tapInstalled = false
+    private var interrupted = false
+    private var recentRestarts: [Double] = []
+
+    /// Guards the values below; held only briefly and never while calling into AVFoundation.
+    private let lock = NSLock()
     private var chunkHandler: (@Sendable (AudioChunk) -> Void)?
     private var bufferHandler: (@Sendable (AVAudioPCMBuffer) -> Void)?
     private var restartHandler: (@Sendable (Double) -> Void)?
     private var failureHandler: (@Sendable (Error) -> Void)?
-
-    // Engine state, guarded by `stateLock`. Notification handlers never take it directly: the engine
-    // posts from an internal queue that `start`/`stop` may wait on, so they hop to `restartQueue`.
-    private let stateLock = NSLock()
-    private var engine: AVAudioEngine?
-    private var engineObserver: NSObjectProtocol?
     private var running = false
-    private var useVoiceProcessing = false
     private var currentSampleRate: Double = 48_000
-    private var interrupted = false
-    private var recentRestarts: [Double] = []
-    private var failedAttempts = 0
-
-    // Accessed only on `restartQueue`.
-    private let restartQueue = DispatchQueue(label: "PianoCoach.AudioInputHub.restart")
-    private var restartPending = false
-    private var restartForced = false
-    private var restartProbes = false
 
     private var observers: [NSObjectProtocol] = []
+    private let restartQueue = DispatchQueue(label: "PianoCoach.AudioInputHub.restart")
 
-    /// Called (on an arbitrary thread) with the new sample rate after capture restarted by itself.
+    /// Called (on an arbitrary thread) with the new sample rate after the engine restarted by itself.
     var onRestart: (@Sendable (Double) -> Void)? {
-        get { handlerLock.withLock { restartHandler } }
-        set { handlerLock.withLock { restartHandler = newValue } }
+        get { lock.withLock { restartHandler } }
+        set { lock.withLock { restartHandler = newValue } }
     }
 
     /// Called (on an arbitrary thread) when capture stopped unexpectedly and could not be restarted.
+    /// `isRunning` is false by then.
     var onFailure: (@Sendable (Error) -> Void)? {
-        get { handlerLock.withLock { failureHandler } }
-        set { handlerLock.withLock { failureHandler = newValue } }
+        get { lock.withLock { failureHandler } }
+        set { lock.withLock { failureHandler = newValue } }
     }
 
-    /// Whether capture is on (including while it waits out an interruption).
-    var isRunning: Bool { stateLock.withLock { running } }
-    var sampleRate: Double { stateLock.withLock { currentSampleRate } }
+    var isRunning: Bool { lock.withLock { running } }
+    var sampleRate: Double { lock.withLock { currentSampleRate } }
 
     init() {
         let center = NotificationCenter.default
+        // Observed for every engine and filtered in `recover`, because the engine is rebuilt after a
+        // media services reset.
+        observers.append(center.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: nil) { @Sendable [weak self] note in
+            guard let self, let changed = note.object as? AVAudioEngine else { return }
+            self.schedule(.configurationChange(ObjectIdentifier(changed)), after: Self.restartDelay)
+        })
         #if os(iOS)
-        let session = AVAudioSession.sharedInstance()
-        observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: session, queue: nil) { [weak self] note in
-            guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+        observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: nil) { @Sendable [weak self] note in
+            guard let self,
+                  let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                   let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
             if type == .began {
-                self?.interruptionBegan()
+                self.schedule(.interruptionBegan, after: 0)
             } else if type == .ended {
-                self?.interruptionEnded()
+                self.schedule(.interruptionEnded, after: Self.restartDelay)
             }
         })
-        observers.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: session, queue: nil) { [weak self] _ in
-            self?.interruptionEnded()
+        observers.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: nil) { @Sendable [weak self] _ in
+            self?.schedule(.mediaServicesReset, after: Self.restartDelay)
         })
-        #endif
-        // Capture can die while the app is in the background without an interruption being
-        // reported, so check whenever the app comes to the front.
-        observers.append(center.addObserver(forName: Self.appDidBecomeActive, object: nil, queue: nil) { [weak self] _ in
-            self?.appBecameActive()
-        })
-    }
-
-    /// `UIApplication`/`NSApplication.didBecomeActiveNotification`, named by string so this class
-    /// needn't import UIKit or AppKit.
-    private static var appDidBecomeActive: Notification.Name {
-        #if os(macOS)
-        return Notification.Name("NSApplicationDidBecomeActiveNotification")
-        #else
-        return Notification.Name("UIApplicationDidBecomeActiveNotification")
         #endif
     }
 
     deinit {
-        observers.forEach { NotificationCenter.default.removeObserver($0) }
-        if let engineObserver { NotificationCenter.default.removeObserver(engineObserver) }
-        engine?.inputNode.removeTap(onBus: 0)
-        engine?.stop()
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     /// Receives mono chunks for note analysis.
     func setChunkHandler(_ handler: (@Sendable (AudioChunk) -> Void)?) {
-        handlerLock.withLock { chunkHandler = handler }
+        lock.withLock { chunkHandler = handler }
     }
 
     /// Receives the raw input buffers (for speech recognition).
     func setBufferHandler(_ handler: (@Sendable (AVAudioPCMBuffer) -> Void)?) {
-        handlerLock.withLock { bufferHandler = handler }
+        lock.withLock { bufferHandler = handler }
     }
 
     // MARK: - Start / stop
 
-    /// Starts capture. Safe to call when already running (it then only restarts a stopped engine).
+    /// Starts capture. Safe to call when already running.
     /// - Parameter voiceProcessing: enables Apple's echo cancellation (reduces the video's sound in the
-    ///   microphone signal, but also colours the piano sound; off by default). If the device can't do
-    ///   it, capture starts without it.
+    ///   microphone signal, but also colours the piano sound; off by default). If it can't be enabled,
+    ///   capture starts without it.
     func start(voiceProcessing: Bool = false) throws {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        if running, voiceProcessing == useVoiceProcessing, engine?.isRunning == true { return }
-        teardownEngineLocked()
-        running = false
-        useVoiceProcessing = voiceProcessing
-        interrupted = false
-        recentRestarts.removeAll()
-        failedAttempts = 0
-        do {
-            try startEngineLocked()
-        } catch {
-            deactivateSessionLocked()
-            throw error
+        try controlLock.withLock {
+            interrupted = false
+            if wanted && voiceProcessing == useVoiceProcessing && engine.isRunning { return }
+            stopEngineLocked()
+            useVoiceProcessing = voiceProcessing
+            recentRestarts.removeAll()
+            do {
+                try startEngineLocked()
+            } catch {
+                shutDownLocked()
+                throw error
+            }
+            wanted = true
+            lock.withLock { running = true }
         }
-        running = true
     }
 
     func stop() {
-        stateLock.withLock {
-            let wasActive = running || engine != nil
-            running = false
-            interrupted = false
-            teardownEngineLocked()
-            if wasActive { deactivateSessionLocked() }
+        controlLock.withLock {
+            guard wanted else { return }
+            shutDownLocked()
         }
     }
+
+    // MARK: - Engine (all called with `controlLock` held)
 
     private func startEngineLocked() throws {
         #if os(iOS)
         try Self.configureSession()
         #endif
-        do {
-            try startFreshEngineLocked(voiceProcessing: useVoiceProcessing)
-        } catch {
-            // Echo cancellation is optional: listen without it rather than not at all.
-            guard useVoiceProcessing else { throw error }
-            try startFreshEngineLocked(voiceProcessing: false)
-        }
-    }
-
-    /// Builds a new engine (its input node then reflects the current hardware) and starts it.
-    private func startFreshEngineLocked(voiceProcessing: Bool) throws {
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
-        if voiceProcessing {
+        if useVoiceProcessing {
             do {
-                try input.setVoiceProcessingEnabled(true)
-                // Duck the video only while someone speaks, and only a little.
-                input.voiceProcessingOtherAudioDuckingConfiguration =
-                    AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: true, duckingLevel: .min)
-                // Keep the piano's real dynamics for the onset detector.
-                input.isVoiceProcessingAGCEnabled = false
+                try startEngineLocked(voiceProcessing: true)
+                return
             } catch {
-                // Not available on this device or route: carry on without it.
+                // Echo cancellation isn't available on this device or route: listen without it.
+                stopEngineLocked()
             }
         }
-        var format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else { throw HubError.noInput }
-        // Voice processing on macOS can report a many-channel layout; take it as mono at the same rate.
-        if format.channelCount > 2,
-           let mono = AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1) {
-            format = mono
+        try startEngineLocked(voiceProcessing: false)
+    }
+
+    private func startEngineLocked(voiceProcessing: Bool) throws {
+        let input = engine.inputNode
+        if input.isVoiceProcessingEnabled != voiceProcessing {
+            try input.setVoiceProcessingEnabled(voiceProcessing)
         }
+        if voiceProcessing {
+            // Voice-processing gain control pumps the level, which blurs piano attacks.
+            input.isVoiceProcessingAGCEnabled = false
+            // Duck the video only while someone is talking, and only a little.
+            input.voiceProcessingOtherAudioDuckingConfiguration =
+                AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: true, duckingLevel: .min)
+        }
+        // Tap at the hardware's current sample rate: after a configuration change the node keeps its
+        // previous output format, and a tap at a rate the hardware doesn't run at raises an exception.
+        // Voice processing advertises several junk channels; its processed signal is the mono output.
+        let hardware = input.inputFormat(forBus: 0)
+        guard hardware.sampleRate > 0, hardware.channelCount > 0,
+              let format = AVAudioFormat(standardFormatWithSampleRate: hardware.sampleRate,
+                                         channels: voiceProcessing ? 1 : min(hardware.channelCount, 2))
+        else { throw HubError.noInput }
+
+        input.removeTap(onBus: 0)
         installTap(on: input, format: format)
-
-        let id = ObjectIdentifier(engine)
-        let observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
-            self?.engineConfigurationChanged(id)
-        }
-        self.engine = engine
-        engineObserver = observer
+        tapInstalled = true
+        // Prepare only after installing the tap: a prepared unit refuses the tap's format.
         engine.prepare()
-        do {
-            try engine.start()
-        } catch {
-            teardownEngineLocked()
-            throw error
+        try engine.start()
+        lock.withLock { currentSampleRate = format.sampleRate }
+    }
+
+    private func stopEngineLocked() {
+        if tapInstalled {
+            engine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
         }
-        currentSampleRate = format.sampleRate
-    }
-
-    private func teardownEngineLocked() {
-        if let engineObserver { NotificationCenter.default.removeObserver(engineObserver) }
-        engineObserver = nil
-        guard let engine else { return }
-        engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        self.engine = nil
     }
 
-    private func deactivateSessionLocked() {
+    private func shutDownLocked() {
+        wanted = false
+        stopEngineLocked()
+        lock.withLock { running = false }
         #if os(iOS)
-        // Gives the video its full playback volume and routing back.
         try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
         #endif
     }
 
     private func installTap(on input: AVAudioInputNode, format: AVAudioFormat) {
         let sampleRate = format.sampleRate
-        // 100 ms, the shortest buffer the engine supports; it may deliver a different size, which is fine.
+        // 100 ms, the smallest buffer the engine reliably delivers.
         let bufferSize = AVAudioFrameCount(sampleRate / 10)
         input.installTap(onBus: 0, bufferSize: bufferSize, format: format) { @Sendable [weak self] buffer, when in
-            self?.deliver(buffer, at: when, sampleRate: sampleRate)
-        }
-    }
-
-    /// Runs on the tap's thread.
-    private func deliver(_ buffer: AVAudioPCMBuffer, at when: AVAudioTime, sampleRate: Double) {
-        let frames = Int(buffer.frameLength)
-        guard frames > 0 else { return }
-        let start = when.isHostTimeValid
-            ? MonotonicClock.seconds(hostTime: when.hostTime)
-            : MonotonicClock.now() - Double(frames) / sampleRate
-        let (analyse, speech) = handlerLock.withLock { (chunkHandler, bufferHandler) }
-        speech?(buffer)
-        // Tap buffers use the engine's standard (deinterleaved float) format.
-        guard let analyse, let data = buffer.floatChannelData else { return }
-        let channels = Int(buffer.format.channelCount)
-        var mono = Array(UnsafeBufferPointer(start: data[0], count: frames))
-        if channels > 1 {
-            for c in 1..<channels {
-                let src = data[c]
-                for i in 0..<frames { mono[i] += src[i] }
+            guard let self else { return }
+            let frames = Int(buffer.frameLength)
+            guard frames > 0 else { return }
+            let start = when.isHostTimeValid
+                ? MonotonicClock.seconds(forHostTime: when.hostTime)
+                : MonotonicClock.now() - Double(frames) / sampleRate
+            let (chunk, speech) = self.lock.withLock { (self.chunkHandler, self.bufferHandler) }
+            speech?(buffer)
+            guard let chunk, let data = buffer.floatChannelData else { return }
+            let channels = Int(buffer.format.channelCount)
+            var mono: [Float]
+            if channels == 1 {
+                mono = Array(UnsafeBufferPointer(start: data[0], count: frames))
+            } else {
+                mono = [Float](repeating: 0, count: frames)
+                let scale = 1 / Float(channels)
+                for c in 0..<channels {
+                    let source = data[c]
+                    for i in 0..<frames { mono[i] += source[i] * scale }
+                }
             }
-            let scale = 1 / Float(channels)
-            for i in 0..<frames { mono[i] *= scale }
+            chunk(AudioChunk(samples: mono, sampleRate: sampleRate, startTime: start))
         }
-        analyse(AudioChunk(samples: mono, sampleRate: sampleRate, startTime: start))
     }
 
     // MARK: - Recovery
 
-    private func engineConfigurationChanged(_ id: ObjectIdentifier) {
-        restartQueue.async { [weak self] in
-            guard let self else { return }
-            let current = self.stateLock.withLock { self.engine.map { ObjectIdentifier($0) } }
-            if current == id { self.requestRestart() }
+    /// Runs the restart logic on `restartQueue`, never on the notifying thread: AVFoundation may post
+    /// while this class holds `controlLock` (e.g. during `setActive`), and the engine must not be torn
+    /// down from inside its own notification.
+    private func schedule(_ trigger: Trigger, after delay: Double) {
+        restartQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.recover(trigger)
         }
     }
 
-    private func interruptionBegan() {
-        restartQueue.async { [weak self] in
-            guard let self else { return }
-            self.stateLock.withLock {
-                self.interrupted = true
-                self.failedAttempts = 0
-            }
+    private func recover(_ trigger: Trigger) {
+        let outcome = controlLock.withLock { recoverLocked(trigger) }
+        switch outcome {
+        case .none: break
+        case .restarted(let rate): onRestart?(rate)
+        case .failed(let error): onFailure?(error)
         }
     }
 
-    /// The interruption ended or the media services were reset: the old engine is dead either way.
-    private func interruptionEnded() {
-        restartQueue.async { [weak self] in
-            guard let self else { return }
-            self.stateLock.withLock { self.interrupted = false }
-            self.requestRestart(force: true)
+    private func recoverLocked(_ trigger: Trigger) -> Outcome {
+        if case .mediaServicesReset = trigger {
+            // Every audio object is invalid now; the next start needs a new engine.
+            engine = AVAudioEngine()
+            tapInstalled = false
+            interrupted = false
         }
-    }
-
-    private func appBecameActive() {
-        restartQueue.async { [weak self] in
-            self?.requestRestart(probingInterruption: true)
+        guard wanted else { return .none }
+        switch trigger {
+        case .interruptionBegan:
+            // The system stopped the engine; wait for the interruption to end.
+            interrupted = true
+            return .none
+        case .configurationChange(let id):
+            // Some changes leave the engine running (macOS posts one right after a voice-processing
+            // start); restarting on those would loop.
+            guard id == ObjectIdentifier(engine), !interrupted, !engine.isRunning else { return .none }
+        case .retry:
+            guard !interrupted, !engine.isRunning else { return .none }
+        case .interruptionEnded:
+            interrupted = false
+        case .mediaServicesReset:
+            break
         }
-    }
 
-    /// On `restartQueue`: coalesces a burst of notifications into one restart shortly afterwards.
-    private func requestRestart(force: Bool = false, probingInterruption: Bool = false) {
-        restartForced = restartForced || force
-        restartProbes = restartProbes || probingInterruption
-        guard !restartPending else { return }
-        restartPending = true
-        restartQueue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            self?.restartIfNeeded()
-        }
-    }
-
-    /// On `restartQueue`. Unless forced, a still-running engine is left alone: some configuration
-    /// changes (e.g. voice processing rebuilding its device on macOS) don't stop it, and restarting
-    /// on those would loop. During an interruption only the app coming to the front tries (an
-    /// interruption doesn't always report its end); if that fails, it keeps waiting for the end.
-    private func restartIfNeeded() {
-        let force = restartForced
-        let probe = restartProbes
-        restartPending = false
-        restartForced = false
-        restartProbes = false
-
-        stateLock.lock()
-        let waiting = interrupted
-        guard running, !waiting || probe, force || engine?.isRunning != true else {
-            stateLock.unlock()
-            return
-        }
         let now = MonotonicClock.now()
-        recentRestarts = recentRestarts.filter { now - $0 < 30 } + [now]
-        if recentRestarts.count > 6 {
-            giveUpLocked()
-            stateLock.unlock()
-            onFailure?(HubError.keepsStopping)
-            return
+        recentRestarts.removeAll { now - $0 > Self.restartWindow }
+        guard recentRestarts.count < Self.maxRestarts else {
+            shutDownLocked()
+            return .failed(HubError.stopped)
         }
-        teardownEngineLocked()
+        recentRestarts.append(now)
+        stopEngineLocked()
         do {
             try startEngineLocked()
-            interrupted = false
-            failedAttempts = 0
-            let rate = currentSampleRate
-            stateLock.unlock()
-            onRestart?(rate)
+            return .restarted(lock.withLock { currentSampleRate })
         } catch {
-            if waiting {
-                stateLock.unlock()
-                return
+            if recentRestarts.count < Self.maxRestarts {
+                // The hardware may still be switching routes; try again shortly.
+                schedule(.retry, after: Self.retryDelay)
+                return .none
             }
-            failedAttempts += 1
-            let attempts = failedAttempts
-            if attempts < 3 {
-                stateLock.unlock()
-                // Often transient (the session is still busy right after an interruption).
-                restartQueue.asyncAfter(deadline: .now() + Double(attempts)) { [weak self] in
-                    self?.requestRestart(force: true)
-                }
-            } else {
-                giveUpLocked()
-                stateLock.unlock()
-                onFailure?(error)
-            }
+            shutDownLocked()
+            return .failed(error)
         }
-    }
-
-    private func giveUpLocked() {
-        running = false
-        failedAttempts = 0
-        teardownEngineLocked()
-        deactivateSessionLocked()
     }
 
     #if os(iOS)
-    /// Records the piano while the video keeps playing.
-    ///
-    /// WebKit plays the video in its own process with a non-mixable playback session, so this session
-    /// must mix with others or one would interrupt the other. `.defaultToSpeaker` keeps the video on the
-    /// loudspeaker rather than the earpiece, and `.allowBluetoothA2DP` keeps Bluetooth headphones in
-    /// stereo (the built-in microphone is used, never a headset's hands-free one). Mode `.default`
-    /// rather than `.measurement`: measurement disables dynamics processing on the output and makes
-    /// the video noticeably quieter, which matters when the coach learns a song from the speaker;
-    /// the onset detector's adaptive threshold copes with the default input processing.
+    /// Records the piano while the video keeps playing. WebKit plays the video in its own process with
+    /// its own (non-mixable) playback session, so:
+    /// - `.mixWithOthers`: starting the microphone doesn't interrupt the video and vice versa.
+    /// - `.defaultToSpeaker`: play-and-record would otherwise send all sound to the iPhone's earpiece.
+    /// - `.allowBluetoothA2DP`, `.allowAirPlay`: headphones and speakers stay usable for the video. Not
+    ///   Bluetooth HFP: that would switch a headset to call quality and listen through its microphone.
+    /// - `.default` mode, not `.measurement`: measurement mode turns off output dynamics processing, which
+    ///   makes the video noticeably quieter on the speaker. The onset detector adapts to the input gain
+    ///   control the default mode keeps, and voice commands benefit from it.
     private static func configureSession() throws {
         let session = AVAudioSession.sharedInstance()
-        let options: AVAudioSession.CategoryOptions = [.mixWithOthers, .defaultToSpeaker, .allowBluetoothA2DP]
+        let options: AVAudioSession.CategoryOptions = [.mixWithOthers, .defaultToSpeaker, .allowBluetoothA2DP, .allowAirPlay]
+        // Restarts shouldn't reconfigure an unchanged session (that can change the route again).
         if session.category != .playAndRecord || session.mode != .default || session.categoryOptions != options {
             try session.setCategory(.playAndRecord, mode: .default, options: options)
         }
+        if session.preferredSampleRate != 48_000 {
+            try? session.setPreferredSampleRate(48_000)
+        }
         try session.setActive(true)
-        guard session.isInputAvailable else { throw HubError.noInput }
     }
     #endif
 }

@@ -143,7 +143,7 @@ struct RoundControlLabel: View {
                 .font(.system(size: size * 0.4, weight: .semibold))
                 .frame(width: size, height: size)
                 .foregroundStyle(prominent || isOn ? Color.white : Color.primary)
-                .background(Circle().fill(fill))
+                .background { Circle().fill(fill) }
             Text(caption)
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
