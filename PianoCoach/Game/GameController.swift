@@ -97,6 +97,8 @@ final class GameController {
     @ObservationIgnored private var engine: GameEngine?
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var countInTask: Task<Void, Never>?
+    /// Whether games listen to the microphone or MIDI keyboard (the screenshot demo plays by itself).
+    @ObservationIgnored var listensForNotes = true
     @ObservationIgnored private var keysDown: Set<Int> = []
     @ObservationIgnored private var glowUntil: [Int: (glow: KeyGlow, until: Double)] = [:]
     @ObservationIgnored private var cheerUntil: Double = 0
@@ -288,7 +290,7 @@ final class GameController {
     private func attachInput() {
         coach.noteObserver = { [weak self] onset, clock in self?.heard(onset, at: clock) }
         coach.keyObserver = { [weak self] key, down in self?.key(key, down: down) }
-        if !coach.isListening { coach.startListening() }
+        if listensForNotes && !coach.isListening { coach.startListening() }
     }
 
     private func detachInput() {

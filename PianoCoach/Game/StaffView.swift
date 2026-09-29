@@ -9,10 +9,13 @@ struct StaffView: View {
     let game: GameController
     let chart: NoteChart
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         // Read everything the drawing needs here, so the view redraws whenever the game moves.
         let scene = StaffScene(chart: chart, position: game.position, speed: game.speed, statuses: game.statuses,
-                               hitTimes: game.hitTimes, now: game.frameTime, showLetters: game.showLetters)
+                               hitTimes: game.hitTimes, now: game.frameTime, showLetters: game.showLetters,
+                               isDark: colorScheme == .dark)
         Canvas { context, size in
             scene.draw(in: &context, size: size)
         }
@@ -33,8 +36,8 @@ struct StaffGeometry {
 
     init(size: CGSize) {
         // Room for the two staves, the gap between them, two ledger lines above and below, and letters.
-        // Large enough to read comfortably on an iPad (up to 26 pt between lines), smaller on a phone.
-        let spacing = max(6, min(26, size.height / 21, size.width / 30))
+        // Large enough to read comfortably on an iPad (up to 32 pt between lines), smaller on a phone.
+        let spacing = max(6, min(32, size.height / 21, size.width / 30))
         let gap = spacing * (size.height / spacing > 24 ? 4.5 : 3.5)
         let systemHeight = 8 * spacing + gap
         self.spacing = spacing
@@ -76,6 +79,7 @@ struct StaffScene {
     let hitTimes: [Int: Double]
     let now: Double
     let showLetters: Bool
+    let isDark: Bool
 
     /// Seconds of music between the playhead and the right edge.
     static let visibleSeconds = 4.0
@@ -112,10 +116,12 @@ struct StaffScene {
                      with: .color(ink))
         drawClefs(in: &context, staff: staff)
 
-        // Bar lines.
+        // Bar lines, a little before the downbeat so they don't run through its notes, but no further than
+        // halfway back to the note before.
         let barInk = Color.primary.opacity(0.35)
         for beat in chart.barLines {
-            let barX = x(beat)
+            let previous = lastOnset(before: beat).map { (x(beat) - x($0)) / 2 } ?? .infinity
+            let barX = x(beat) - min(s * 1.8, previous)
             guard barX > clefRight, barX < size.width else { continue }
             context.fill(Path(CGRect(x: barX - 0.5, y: staff.trebleTop, width: 1, height: staff.bassBottom - staff.trebleTop)),
                          with: .color(barInk))
@@ -213,12 +219,45 @@ struct StaffScene {
                 layer.draw(sign, at: CGPoint(x: noteX - headWidth * 0.62, y: noteY), anchor: .trailing)
             }
             if showLetters {
-                var label = text(spelled.name, size: max(9, s * 0.95), weight: .bold)
+                // Below the head, clear of its ledger lines; beside it when another note of the chord is just
+                // below. On a patch of background so staff lines don't cross the letter.
+                let beside = hasNoteJustBelow(note, step: step, treble: treble)
+                var label = text(spelled.name, size: max(9, s * (beside ? 0.78 : 0.95)), weight: .bold)
                 label.shading = .color(status == .pending ? Color.secondary : color)
-                // Below the head, clear of its ledger lines.
-                layer.draw(label, at: CGPoint(x: noteX, y: noteY + headHeight / 2 + s * 0.35), anchor: .top)
+                let labelSize = label.measure(in: CGSize(width: s * 4, height: s * 4))
+                let origin = beside
+                    ? CGPoint(x: noteX + headWidth * 0.62 + s * 0.2, y: noteY - labelSize.height / 2)
+                    : CGPoint(x: noteX - labelSize.width / 2, y: noteY + headHeight / 2 + s * 0.35)
+                let patch = CGRect(origin: origin, size: labelSize).insetBy(dx: -s * 0.15, dy: -s * 0.04)
+                layer.fill(Path(roundedRect: patch, cornerRadius: s * 0.25), with: .color(paper))
+                layer.draw(label, at: origin, anchor: .topLeading)
             }
         }
+    }
+
+    /// The game's background colour, behind letters.
+    private var paper: Color {
+        isDark ? Color(red: 0.08, green: 0.075, blue: 0.16) : Color(red: 0.945, green: 0.955, blue: 1)
+    }
+
+    /// Whether the chord has another note on the same staff within a sixth below this one (where the letter
+    /// would go). Notes are sorted by time, then pitch.
+    private func hasNoteJustBelow(_ note: ChartNote, step: Int, treble: Bool) -> Bool {
+        guard note.id > 0, note.id <= chart.notes.count else { return false }
+        let below = chart.notes[note.id - 1]
+        guard abs(below.time - note.time) < 1e-3 else { return false }
+        let belowStep = NoteSpelling.spell(below.midi, keyFifths: chart.keyFifths).staffStep
+        return Self.isOnTreble(note: below, step: belowStep) == treble && step - belowStep <= 5
+    }
+
+    /// Start of the last note before `beat`, if any (notes are sorted by time).
+    private func lastOnset(before beat: Double) -> Double? {
+        var low = 0, high = chart.notes.count
+        while low < high {
+            let mid = (low + high) / 2
+            if chart.notes[mid].time < beat - 1e-6 { low = mid + 1 } else { high = mid }
+        }
+        return low > 0 ? chart.notes[low - 1].time : nil
     }
 
     /// Start time of the next notes to play (they are shown in the accent colour).

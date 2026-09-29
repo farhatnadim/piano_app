@@ -504,7 +504,16 @@ final class AppModel {
         if let existing = pieces.first(where: { $0.title == DemoSong.title }) {
             piece = existing
         } else {
-            piece = Piece(title: DemoSong.title, videoID: "Ode2JoyDemo")
+            var demo = Piece(title: DemoSong.title, videoID: "Ode2JoyDemo")
+            demo.difficulty = ChartDifficulty.estimate(DemoSong.chart).level
+            // A few games already played, so the library shows a level and stars.
+            var progress = GameProgress(speed: 0.7)
+            progress.gamesPlayed = 3
+            progress.bestStars = 2
+            progress.bestAccuracy = 0.86
+            progress.bestScore = 2_450
+            demo.game = progress
+            piece = demo
             pieces.insert(piece, at: 0)
             persist()
         }
@@ -518,12 +527,43 @@ final class AppModel {
             }
             #endif
             self.openPiece(piece)
-            self.game.load(chart: DemoSong.chart, progress: GameProgress(speed: 0.7))
+            self.game.load(chart: DemoSong.chart, progress: piece.game)
             self.practiceTab = .game
             self.game.display = scene.contains("notes") ? .notes : .keys
             guard !scene.contains("start") else { return }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
-            self.game.playDemo()
+            self.game.listensForNotes = false
+            self.game.start()
+            self.playScreenshotGame()
+        }
+    }
+
+    /// Plays the notes a Learn game waits for, a moment after it starts waiting, like a child following along.
+    private func playScreenshotGame() {
+        Task { @MainActor [weak self] in
+            var waitingSince: Double?
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                guard let game = self?.game else { return }
+                switch game.phase {
+                case .ready, .countIn, .paused: continue
+                case .playing: break
+                default: return
+                }
+                guard game.isWaiting else {
+                    waitingSince = nil
+                    continue
+                }
+                let now = MonotonicClock.now()
+                if let since = waitingSince {
+                    if now - since > 0.25 {
+                        for midi in game.upcomingKeys.sorted() { game.tapKey(midi) }
+                        waitingSince = nil
+                    }
+                } else {
+                    waitingSince = now
+                }
+            }
         }
     }
     #endif

@@ -101,28 +101,36 @@ jobs:
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl install "$UDID" "$APP"
           BUNDLE=com.farhatnadim.PianoCoach
+          ROTATE=0
+          # shoot NAME SECONDS ARGS...: launches the app with ARGS and takes a screenshot after SECONDS.
           shoot() {
-            name=$1; shift
+            name=$1; wait=$2; shift 2
             xcrun simctl terminate "$UDID" "$BUNDLE" 2>/dev/null || true
             xcrun simctl launch "$UDID" "$BUNDLE" "$@"
-            sleep 9
+            sleep "$wait"
             xcrun simctl io "$UDID" screenshot "shots/$name.png"
+            # Screenshots are always taken in the portrait framebuffer's orientation.
+            if [ "$ROTATE" = 1 ]; then sips -r 270 "shots/$name.png" > /dev/null; fi
             sips -s format jpeg -s formatOptions 70 -Z 1600 "shots/$name.png" --out "shots/$name.jpg" > /dev/null
           }
-          shoot 1-keys -screenshot-demo keys
-          shoot 2-notes -screenshot-demo notes
-          shoot 3-start -screenshot-demo start
-          shoot 6-library
+          # The game shots play a Learn game by themselves (3 s count-in and lead-in, then notes).
+          shoot 1-keys 15 -screenshot-demo keys
+          shoot 2-notes 15 -screenshot-demo notes
+          shoot 3-start 8 -screenshot-demo start
+          shoot 6-library 8
           # iPad apps that support multitasking can't rotate themselves, so rotate the simulator
           # from its Device menu (needs UI scripting on the runner; skipped if unavailable).
           open -a Simulator --args -CurrentDeviceUDID "$UDID" || true
           sleep 6
-          osascript -e 'tell application "Simulator" to activate' \
-            -e 'tell application "System Events" to tell process "Simulator" to click menu item "Rotate Left" of menu "Device" of menu bar 1' \
-            || echo "Could not rotate the simulator"
+          if osascript -e 'tell application "Simulator" to activate' \
+            -e 'tell application "System Events" to tell process "Simulator" to click menu item "Rotate Left" of menu "Device" of menu bar 1'; then
+            ROTATE=1
+          else
+            echo "Could not rotate the simulator"
+          fi
           sleep 3
-          shoot 4-keys-landscape -screenshot-demo keys landscape
-          shoot 5-notes-landscape -screenshot-demo notes landscape
+          shoot 4-keys-landscape 15 -screenshot-demo keys landscape
+          shoot 5-notes-landscape 15 -screenshot-demo notes landscape
           for f in shots/*.png; do echo "$f $(sips -g pixelWidth -g pixelHeight "$f" | awk '/pixel/ {printf "%s ", $2}')"; done
       - uses: actions/upload-artifact@v4
         with:
