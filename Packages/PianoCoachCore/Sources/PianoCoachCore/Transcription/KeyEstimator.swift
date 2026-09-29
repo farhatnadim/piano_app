@@ -59,7 +59,9 @@ public enum KeyEstimator {
             }
         }
         // Stable order: equal scores prefer major and the lower tonic.
-        scored.sort { $0.score != $1.score ? $0.score > $1.score : ($0.minor ? 1 : 0, $0.tonic) < ($1.minor ? 1 : 0, $1.tonic) }
+        scored.sort {
+            $0.score != $1.score ? $0.score > $1.score : ($0.minor ? 1 : 0, $0.tonic) < ($1.minor ? 1 : 0, $1.tonic)
+        }
         let best = scored[0]
         let confidence = max(0, min(1, (best.score - scored[1].score) * 5))
         return EstimatedKey(tonicPitchClass: best.tonic, isMinor: best.minor, confidence: confidence)

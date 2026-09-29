@@ -14,7 +14,8 @@ public struct ArrangedSong: Sendable {
     public var isMinor: Bool
     /// "G major", "E minor", "B♭ major".
     public var keyName: String
-    /// Notes in the song, and notes of the transcription left out as noise, fragments or duplicates.
+    /// Notes in the song, and notes of the transcription left out (noise, overtone ghosts, fragments joined
+    /// to their note, duplicates).
     public var noteCount: Int
     public var removedNoteCount: Int
     /// 0...1: how well the notes fit the beat grid, and how clearly the key won.
@@ -41,8 +42,8 @@ public struct ArrangedSong: Sendable {
 
 /// Turns the flat list of notes heard in a recording into a song a child can play and read.
 ///
-/// Steps: clean up transcription noise, split the notes between the hands, find the key, find one steady
-/// tempo and the meter, then lay the notes out in beats and measures. Timing is never bent to a grid:
+/// Steps: clean up transcription noise, find one steady tempo, split the notes between the hands, find the
+/// key and the meter, then lay the notes out in beats and measures. Timing is never bent to a grid:
 /// beats are a straight rescaling of seconds (see `ArrangedSong.seconds(atBeat:)`), so playing the song
 /// at 100 % reproduces the recording's timing. Only notes struck together (a chord) share one onset.
 public enum SongArranger {
@@ -60,15 +61,14 @@ public enum SongArranger {
         /// two octaves, two octaves and a third, two octaves and a fifth or three octaves above) is a ghost
         /// the transcriber heard in that note's sound when it is quieter than these fractions of it.
         ///
-        /// Measured with Basic Pitch on a recorded piano, ghosts reach about 0.55 of their note (octaves
-        /// are the strongest), while real notes struck together with a lower note an octave below reach
-        /// down to about 0.7 of it, and a twelfth or two octaves below down to about 0.58: these limits
-        /// sit between the two.
+        /// Measured with Basic Pitch on a recorded piano, octave ghosts reach about 0.55 of their note,
+        /// while real notes struck together with a note an octave below reach down to about 0.7 of it, and
+        /// a twelfth or two octaves below down to about 0.58: these limits sit between the two.
         public var octaveOvertoneAmplitudeRatio = 0.63
         public var overtoneAmplitudeRatio = 0.5
-        /// Limit when the lower note was already sounding: a newly struck note is louder than the fading
-        /// one, so a real melody note above a held bass note stays.
-        public var sustainedOvertoneAmplitudeRatio = 0.5
+        /// Limit when the lower note was already sounding. Ghosts that appear while a note rings stay under
+        /// about 0.66 of it, while a newly struck note above a held one was measured at 0.78 or more.
+        public var sustainedOvertoneAmplitudeRatio = 0.65
         /// Notes starting within this many seconds of each other are struck together.
         public var overtoneOnsetWindow = 0.06
         /// Notes starting within this many seconds (or 1/32 of a beat, if longer) are struck together.
@@ -252,7 +252,8 @@ public enum SongArranger {
         var measures: [ScoreMeasure] = []
         var start = 0.0
         repeat {
-            measures.append(ScoreMeasure(index: measures.count, sourceIndex: measures.count, number: String(measures.count + 1),
+            let index = measures.count
+            measures.append(ScoreMeasure(index: index, sourceIndex: index, number: String(index + 1),
                                          startBeat: start, lengthBeats: measureLength, timeSignature: signature))
             start += measureLength
         } while start <= lastOnset + 1e-9 || start < end - 1.0 / 960

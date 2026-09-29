@@ -262,7 +262,8 @@ public enum TempoEstimator {
     /// Weighted least-squares fit of `time = anchor + k * period` to the onsets on the beat, starting around
     /// the anchor and widening until it spans the song, so a small period error cannot pile up into a
     /// wrong beat far away.
-    static func refine(_ onsets: [Onset], period: Double, anchor: Double, tolerance: Double) -> (period: Double, anchor: Double) {
+    static func refine(_ onsets: [Onset], period: Double, anchor: Double,
+                       tolerance: Double) -> (period: Double, anchor: Double) {
         var fit = (period: period, anchor: anchor)
         let first = onsets[0].time, last = onsets[onsets.count - 1].time
         var horizon = max(8, 8 * period)

@@ -333,13 +333,13 @@ final class SongLearner {
         }
     }
 
-    /// The whole pipeline, off the main thread: 22.05 kHz audio -> model -> notes -> arranged song.
+    /// The whole pipeline, off the main thread: recording -> model -> notes -> arranged song.
     private nonisolated static func makeSong(samples: [Float], sampleRate: Double, title: String,
                                              progress: @escaping @Sendable (Double) -> Void) throws -> ArrangedSong {
         guard !samples.isEmpty else { throw LearnError.noSound }
-        let audio = BasicPitch.resample(samples, from: sampleRate)
         let model = try loadModel()
-        let notes = try BasicPitch.transcribe(samples: audio, progress: { progress($0 * 0.95) }) { window in
+        let notes = try SongTranscriber.notes(inRecording: samples, sampleRate: sampleRate,
+                                              progress: { progress($0 * 0.95) }) { window in
             try Task.checkCancellation()
             return try model.run(window: window)
         }

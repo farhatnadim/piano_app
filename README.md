@@ -181,7 +181,7 @@ MIDI file / MusicXML ───────────────────�
   microphone stream, biased towards the command phrases.
 
 The engine is the Swift package in `Packages/PianoCoachCore`. It uses Foundation only (plus Core ML
-and AVFoundation for the model and the piano recordings on Apple platforms) and has more than 250
+and AVFoundation for the model and the piano recordings on Apple platforms) and has more than 300
 unit tests. Run them with:
 
 ```sh

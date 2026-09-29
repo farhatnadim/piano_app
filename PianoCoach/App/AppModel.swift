@@ -263,7 +263,7 @@ final class AppModel {
     private func saveLearnedSong(_ song: ArrangedSong, origin: NotesOrigin, pieceID: UUID) {
         guard let store, var piece = pieces.first(where: { $0.id == pieceID }) else { return }
         do {
-            let data = MIDIFileWriter.data(for: song.score)
+            let data = song.midiFileData
             let attachment = try store.importAttachment(data: data, fileExtension: "mid",
                                                         originalName: "\(piece.title).mid")
             if let old = piece.sheet { store.removeAttachment(old) }

@@ -27,7 +27,24 @@ final class TranscriptionModelTests: XCTestCase {
         let output = try model.run(window: silence)
         XCTAssertEqual(output.note.count, BasicPitch.framesPerWindow * 88)
         XCTAssertEqual(output.onset.count, BasicPitch.framesPerWindow * 88)
-        XCTAssertLessThan(output.note.max() ?? 1, 0.3, "silence shouldn't sound like notes")
+        XCTAssertTrue(output.note.allSatisfy(\.isFinite) && output.onset.allSatisfy(\.isFinite))
+        // Pure digital silence can give high activations (0.9 has been seen); SongTranscriber guards against it.
+        let dithered = try model.run(window: RecordingCleanup.prepare(silence, sampleRate: BasicPitch.sampleRate).samples)
+        print(String(format: "Basic Pitch on silence: note max %.3f; with the noise floor: %.3f",
+                     output.note.max() ?? 0, dithered.note.max() ?? 0))
+    }
+
+    func testSilenceGivesNoNotes() throws {
+        let model = try loadModel()
+        let seconds = 6.0
+        let zeros = [Float](repeating: 0, count: Int(seconds * 48_000))
+        XCTAssertEqual(try SongTranscriber.notes(inRecording: zeros, sampleRate: 48_000) { try model.run(window: $0) }, [])
+        var state: UInt32 = 1
+        let hiss = zeros.map { _ -> Float in
+            state = state &* 1_664_525 &+ 1_013_904_223
+            return (Float(state >> 8) / Float(1 << 24) - 0.5) * 2e-5
+        }
+        XCTAssertEqual(try SongTranscriber.notes(inRecording: hiss, sampleRate: 48_000) { try model.run(window: $0) }, [])
     }
 
     func testTranscribesMelodyAndBass() throws {
