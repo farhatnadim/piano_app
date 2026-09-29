@@ -14,7 +14,7 @@ struct LibraryView: View {
         List(selection: selection) {
             ForEach(model.pieces) { piece in
                 NavigationLink(value: piece.id) {
-                    PieceRow(piece: piece, isLooping: isLooping(piece))
+                    PieceRow(piece: piece)
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button { deleting = piece } label: {
@@ -94,7 +94,7 @@ struct LibraryView: View {
                 deleting = nil
             }
         } message: { _ in
-            Text("Its sheet music and what the coach learned are deleted too.")
+            Text("The notes Piano Coach learned and the game progress are deleted too.")
         }
     }
 
@@ -123,10 +123,6 @@ struct LibraryView: View {
         Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })
     }
 
-    private func isLooping(_ piece: Piece) -> Bool {
-        piece.id == model.openPieceID ? model.coach.loop != nil : piece.loop != nil
-    }
-
     private func current(_ piece: Piece) -> Piece? {
         model.pieces.first { $0.id == piece.id }
     }
@@ -145,10 +141,9 @@ struct LibraryView: View {
     }
 }
 
-/// One piece in the library: thumbnail, title and badges.
+/// One piece in the library: thumbnail, title, whether its notes are ready, and game progress.
 private struct PieceRow: View {
     let piece: Piece
-    let isLooping: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -157,29 +152,20 @@ private struct PieceRow: View {
                 Text(piece.title)
                     .font(.headline)
                     .lineLimit(2)
-                if hasBadges {
-                    HStack(spacing: 6) {
-                        if piece.sheet != nil || piece.displaySheet != nil {
-                            Badge(text: "Music", systemImage: "music.note.list")
-                        }
-                        if piece.hasLearnedTrack {
-                            Badge(text: "Learned", systemImage: "ear")
-                        }
-                        if isLooping {
-                            Badge(text: "Loop", systemImage: "repeat")
-                        }
+                if hasNotes {
+                    if piece.difficulty != nil || piece.game != nil {
+                        GameSummary(difficulty: piece.difficulty, progress: piece.game)
                     }
-                }
-                if piece.difficulty != nil || piece.game != nil {
-                    GameSummary(difficulty: piece.difficulty, progress: piece.game)
+                } else {
+                    Badge(text: "Needs listening", systemImage: "ear")
                 }
             }
         }
         .padding(.vertical, 4)
     }
 
-    private var hasBadges: Bool {
-        piece.sheet != nil || piece.displaySheet != nil || piece.hasLearnedTrack || isLooping
+    private var hasNotes: Bool {
+        piece.sheet?.kind.hasNotes == true || piece.hasLearnedTrack
     }
 }
 

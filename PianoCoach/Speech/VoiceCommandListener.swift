@@ -4,14 +4,14 @@ import Observation
 import PianoCoachCore
 import Speech
 
-/// Listens for spoken commands ("slower", "wait for me", "measure twelve") with Apple's speech recogniser
-/// (on-device when supported), sharing the microphone with the note analyser through `AudioInputHub`.
+/// Listens for spoken commands ("play", "stop", "slower", "faster") with Apple's speech recogniser
+/// (on-device when supported), sharing the microphone with the note analyser through `AudioHub`.
 ///
 /// Recognition runs as a chain of short tasks: a fresh one starts after every command (so the next
 /// transcript starts empty), when a task ends or fails, and every ~50 s. Partial transcripts grow word by
 /// word and the parser re-finds the same command in each, so a command is acted on only once it has stayed
-/// the same for a moment, or when the result is final: "wait" must not pause the video while the child is
-/// still saying "wait for me". Events from a task that has been replaced are ignored.
+/// the same for a moment, or when the result is final: "play" must not start the game while the child is
+/// still saying "play the song". Events from a task that has been replaced are ignored.
 ///
 /// SpeechAnalyzer (iOS/macOS 26) is not used: SFSpeechRecognizer is still supported there, covers the
 /// iOS 17 / macOS 14 targets, and takes `contextualStrings` to bias it towards the command phrases.
@@ -24,13 +24,13 @@ final class VoiceCommandListener {
     private(set) var errorMessage: String?
     /// Only act on commands that follow a wake word ("hey coach, slower").
     var requireWakeWord = false
-    /// Extra condition under which the wake word is required, checked for every transcript — e.g. while
-    /// the video's own sound is playing, so a teacher saying "stop" in the video isn't taken as a command.
+    /// Extra condition under which the wake word is required, checked for every transcript — e.g. while a
+    /// video with speech is playing, so someone saying "stop" in it isn't taken as a command.
     @ObservationIgnored var requireWakeWordWhen: (() -> Bool)?
     /// Receives each recognised command, on the main actor.
     @ObservationIgnored var onCommand: ((VoiceCommand) -> Void)?
 
-    private let audio: AudioInputHub
+    private let audio: AudioHub
     private let feed = RequestFeed()
     @ObservationIgnored private var recognizer: SFSpeechRecognizer?
     @ObservationIgnored private var recognizerDelegate: RecognizerDelegate?
@@ -55,8 +55,8 @@ final class VoiceCommandListener {
 
     /// Seconds a command must stay unchanged before it is acted on.
     private static let shortWindow = 0.35
-    /// Used when the transcript may still grow into a different command ("wait" -> "wait for me",
-    /// "measure two" -> "measure twenty").
+    /// Used when the transcript may still grow into a different command ("play" -> "play the song",
+    /// "speed seventy" -> "speed seventy five").
     private static let longWindow = 0.8
     /// Longest wait after a command first appears, even while more words keep arriving.
     private static let maxWait = 1.5
@@ -65,13 +65,13 @@ final class VoiceCommandListener {
     private static let maxTaskAge = 58.0
     /// Last words after which a longer phrase can still turn into a different command.
     private static let continuationWords: Set<String> = [
-        "wait", "stop", "start", "go", "back", "loop", "repeat", "turn", "no",
-        "to", "the", "for", "this", "more", "off", "on",
+        "play", "show", "stop", "start", "go", "repeat", "turn", "no", "reduce", "increase", "right", "left",
+        "to", "the", "for", "this", "it", "me", "more", "off", "on", "just", "only",
     ]
     private static let unavailableMessage =
         "Speech recognition is unavailable right now (it may need an internet connection). Voice commands will come back by themselves."
 
-    init(audio: AudioInputHub) {
+    init(audio: AudioHub) {
         self.audio = audio
     }
 
@@ -87,7 +87,7 @@ final class VoiceCommandListener {
         errorMessage = nil
 
         guard await Permissions.requestMicrophone() else {
-            errorMessage = AudioInputHub.HubError.permissionDenied.localizedDescription
+            errorMessage = AudioHub.HubError.permissionDenied.localizedDescription
             return
         }
         let status = await Self.speechAuthorization()
@@ -119,7 +119,7 @@ final class VoiceCommandListener {
         beginTask()
     }
 
-    /// Stops recognising. The microphone keeps running for the coach; the app stops it when idle.
+    /// Stops recognising. The microphone keeps running for the game; the app stops it when idle.
     func stop() {
         wantsRunning = false
         audio.setBufferHandler(nil)
@@ -314,7 +314,7 @@ final class VoiceCommandListener {
 
     private static func stabilityWindow(for command: VoiceCommand, in words: String) -> Double {
         switch command {
-        case .goToMeasure, .setSpeed:
+        case .setSpeed:
             return longWindow
         default:
             let last = words.lowercased().split(whereSeparator: { !$0.isLetter }).last.map(String.init) ?? ""

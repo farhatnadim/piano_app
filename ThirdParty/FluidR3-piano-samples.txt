@@ -1,0 +1,8 @@
+Piano sound (PianoCoach/PianoSamples/Piano-021.mp3 … Piano-108.mp3)
+
+The recordings of each piano key are the "Acoustic Grand Piano" of the Fluid (R3) General MIDI SoundFont
+(FluidR3_GM.sf2) by Frank Wen, as rendered to one MP3 file per key by the MIDI.js Soundfonts project
+(https://github.com/gleitz/midi-js-soundfonts, folder FluidR3_GM/acoustic_grand_piano-mp3). The files were
+renamed by MIDI note number; they are otherwise unchanged.
+
+License: Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/).

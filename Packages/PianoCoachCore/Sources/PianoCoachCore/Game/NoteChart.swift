@@ -18,13 +18,16 @@ public struct ChartNote: Codable, Hashable, Identifiable, Sendable {
     /// How long it is held, in beats (drawn as the length of the falling bar).
     public var duration: Double
     public var hand: Hand
+    /// How hard to play it back, 0...1 (MIDI velocity / 127); nil when unknown (use a default loudness).
+    public var velocity: Double?
 
-    public init(id: Int, midi: Int, time: Double, duration: Double, hand: Hand) {
+    public init(id: Int, midi: Int, time: Double, duration: Double, hand: Hand, velocity: Double? = nil) {
         self.id = id
         self.midi = midi
         self.time = time
         self.duration = duration
         self.hand = hand
+        self.velocity = velocity
     }
 
     public var end: Double { time + duration }
@@ -32,7 +35,7 @@ public struct ChartNote: Codable, Hashable, Identifiable, Sendable {
 
 /// The notes of a song as a game plays them: pitches on a timeline measured in beats.
 ///
-/// At 100 % speed one beat lasts `60 / beatsPerMinute` seconds. Charts made by listening use
+/// At 100 % speed one beat lasts `60 / beatsPerMinute` seconds. Charts made by `fromListening` use
 /// 60 BPM, so their beats are simply seconds of the original video.
 public struct NoteChart: Codable, Hashable, Sendable {
     public var title: String
@@ -96,7 +99,8 @@ public struct NoteChart: Codable, Hashable, Sendable {
         let notes: [ChartNote]
         if !score.notes.isEmpty {
             notes = score.notes.map {
-                ChartNote(id: 0, midi: $0.midi, time: $0.beat, duration: max(0.1, $0.durationBeats), hand: $0.hand)
+                ChartNote(id: 0, midi: $0.midi, time: $0.beat, duration: max(0.1, $0.durationBeats), hand: $0.hand,
+                          velocity: $0.velocity)
             }
         } else {
             notes = score.events.flatMap { e in

@@ -83,14 +83,31 @@ struct GameScreen: View {
 
 /// The game itself: the HUD, the notes (falling or on the staff) and the keyboard, with the count-in,
 /// pause and results on top. Every size comes from the space available (iPad split view, Stage Manager).
+///
+/// The keyboard is a real 88-key piano. Unless the child chose to see all 88 keys, a camera zooms in on the
+/// part the song is played on and follows the music (`KeyboardCamera`), with a minimap of the whole piano
+/// above the keys. The falling notes share the keyboard's window, so this view updates every frame.
 private struct PlayArea: View {
     let game: GameController
     let chart: NoteChart
 
+    @AppStorage(KeyboardZoom.storageKey) private var zoom = KeyboardZoom.auto
+    /// The camera for `chart`, built once (it indexes the notes).
+    @State private var preparedCamera: KeyboardCamera?
+
     var body: some View {
-        let layout = KeyboardLayout(chart: chart)
         let display = game.display
+        let camera = preparedCamera.flatMap { $0.chart == chart ? $0 : nil } ?? KeyboardCamera(chart: chart)
+        let position = game.position
+        let secondsPerBeat = chart.secondsPerBeat(atSpeed: game.speed)
         GeometryReader { geo in
+            let minimumKeys = Self.minimumWhiteKeys(forWidth: geo.size.width)
+            let layout = zoom == .all
+                ? KeyboardLayout.wholeKeyboard
+                : camera.layout(at: position, secondsPerBeat: secondsPerBeat, minimumWhiteKeys: minimumKeys)
+            let sizingKeys = zoom == .all
+                ? Double(KeyboardLayout.whiteKeyTotal)
+                : max(minimumKeys, camera.songWhiteKeys)
             VStack(spacing: 0) {
                 if game.phase == .demo {
                     DemoBar(game: game)
@@ -111,17 +128,32 @@ private struct PlayArea: View {
                     .padding(.top, 12)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .topTrailing) {
+                    KeyboardZoomPicker()
+                        .padding(10)
+                }
+                if zoom == .auto {
+                    KeyboardMinimap(layout: layout, glows: game.keyGlows, hints: game.upcomingKeys)
+                        .frame(height: KeyboardMinimap.height)
+                }
                 GameKeyboard(game: game, layout: layout)
-                    .frame(height: Self.keyboardHeight(for: geo.size, layout: layout, display: display))
+                    .frame(height: Self.keyboardHeight(for: geo.size, whiteKeys: sizingKeys, display: display))
             }
         }
         .overlay { PhaseOverlay(game: game) }
+        .onChange(of: chart, initial: true) { preparedCamera = KeyboardCamera(chart: chart) }
+    }
+
+    /// The narrowest window the camera zooms to: two octaves, or more on wide screens rather than giant keys.
+    static func minimumWhiteKeys(forWidth width: CGFloat) -> Double {
+        max(KeyboardCamera.minimumWhiteKeys, Double(width / 64))
     }
 
     /// Big, touch-friendly keys under the falling notes (about a quarter of the height); a smaller keyboard
-    /// under the staff, which needs the room.
-    static func keyboardHeight(for size: CGSize, layout: KeyboardLayout, display: GameDisplay) -> CGFloat {
-        let whiteKey = layout.whiteKeyWidth(forWidth: size.width)
+    /// under the staff, which needs the room. Sized for all of the song's keys (`whiteKeys` wide) rather than
+    /// the moving window, so nothing jumps while the camera zooms.
+    static func keyboardHeight(for size: CGSize, whiteKeys: Double, display: GameDisplay) -> CGFloat {
+        let whiteKey = size.width / CGFloat(max(1, whiteKeys))
         switch display {
         case .keys: return max(80, min(size.height * 0.24, whiteKey * 5.5, 280))
         case .notes: return max(64, min(size.height * 0.17, whiteKey * 4.5, 170))

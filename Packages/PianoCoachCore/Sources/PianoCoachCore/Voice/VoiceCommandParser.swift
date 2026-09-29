@@ -7,12 +7,12 @@ import Foundation
 ///
 /// Speech recognisers deliver growing partial transcripts, so the newest words matter most: among all
 /// phrases found, the parser returns the one that **ends latest** in the utterance. When two phrases end
-/// on the same word the longer one wins ("wait for me" beats "wait", "stop looping" beats "stop",
-/// "start again" beats "again").
+/// on the same word the longer one wins ("play the song" beats "play", "show me the notes" beats
+/// "show me", "start again" beats "again").
 public struct VoiceCommandParser: Sendable {
     /// When true, only the words after the last wake word are considered, and an utterance without a
-    /// wake word yields nil. A wake word that is itself part of a command ("coach off",
-    /// "turn off the coach") counts as addressing the coach, and the command is kept.
+    /// wake word yields nil. A wake word that is itself part of a command phrase counts as addressing the
+    /// coach, and the command is kept.
     public var requireWakeWord: Bool
     /// Phrases that address the coach, e.g. "hey coach".
     public var wakeWords: [String]
@@ -34,40 +34,27 @@ public struct VoiceCommandParser: Sendable {
 
     /// Canonical phrases (at most 100) to bias the speech recogniser towards,
     /// e.g. `SFSpeechAudioBufferRecognitionRequest.contextualStrings`.
-    public static let contextualStrings: [String] = {
-        var list = [
-            // play / pause
-            "play", "pause", "stop", "keep going", "let's go", "wait", "hold on",
-            // speed
-            "slower", "slow down", "too fast", "faster", "speed up", "too slow",
-            "normal speed", "half speed", "quarter speed", "three quarter speed", "fifty percent", "seventy five percent",
-            // sheet music
-            "show the music", "show me the music", "show the notes", "sheet music",
-            "hide the music", "hide the notes", "no music",
-            // coach modes
-            "follow me", "follow along", "wait for me", "coach off", "stop following", "free play",
-            // navigation
-            "go back", "rewind", "back up", "go forward", "skip ahead",
-            "again", "one more time", "do it again", "try again", "repeat",
-            "from the top", "start over", "from the beginning", "start again", "restart",
-            "go to measure", "measure", "bar",
-            // loops
-            "loop this", "loop this part", "practice this part", "stop looping", "stop the loop", "loop off", "no loop",
-            // sound
-            "sound on", "sound off", "mute", "unmute", "quiet",
-            // help
-            "help", "what can I say",
-            // wake words
-            "hey coach", "piano coach",
-        ]
-        let numberWords = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-                           "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
-                           "eighteen", "nineteen", "twenty"]
-        for word in numberWords where list.count < 100 {
-            list.append("measure \(word)")
-        }
-        return list
-    }()
+    public static let contextualStrings: [String] = [
+        // play / stop
+        "play", "stop", "pause", "keep going", "let's go", "wait", "hold on",
+        // speed
+        "slower", "slow down", "too fast", "reduce speed", "reduce the speed", "decrease the speed",
+        "faster", "speed up", "too slow", "increase speed", "increase the speed",
+        "normal speed", "half speed", "quarter speed", "three quarter speed", "fifty percent", "seventy five percent",
+        // listening and views
+        "listen", "play the song", "show me", "show me how",
+        "show the notes", "show me the notes", "show the keys", "show the keyboard",
+        // hands
+        "right hand", "left hand", "both hands",
+        // again
+        "again", "one more time", "do it again", "try again", "from the top", "start over", "from the beginning",
+        // sound
+        "sound on", "sound off", "mute", "unmute", "quiet",
+        // help
+        "help", "what can I say",
+        // wake words
+        "hey coach", "piano coach",
+    ]
 
     // MARK: - Matching
 
@@ -86,7 +73,7 @@ public struct VoiceCommandParser: Sendable {
         var tokens: [String]
         var command: VoiceCommand
         /// The phrase does not count when immediately followed by one of these words
-        /// ("go" in "go to measure …" is not "play").
+        /// ("go" in "let's go to the beginning" is not "play").
         var notFollowedBy: Set<String>
     }
 
@@ -131,39 +118,7 @@ public struct VoiceCommandParser: Sendable {
             }
         }
 
-        let dynamicPriority = phrases.count
-        matches += measureMatches(in: tokens, priority: dynamicPriority)
-        matches += speedMatches(in: tokens, priority: dynamicPriority + 1)
-        return matches
-    }
-
-    private static let measureKeywords: Set<String> = ["measure", "measures", "bar", "bars", "major"]
-    private static let ordinalMeasureKeywords: Set<String> = ["measure", "bar"]
-
-    /// "measure 12", "go to bar twelve", "measure to" (-> 2), "bar for" (-> 4), "the third measure".
-    private static func measureMatches(in tokens: [String], priority: Int) -> [Match] {
-        var matches: [Match] = []
-        let n = tokens.count
-        for i in 0..<n where measureKeywords.contains(tokens[i]) {
-            // Keyword followed by a number ("measure number 5" is fine too).
-            var j = i + 1
-            if j < n, tokens[j] == "number" { j += 1 }
-            if let p = NumberWords.scan(tokens, from: j, allowHomophones: true) {
-                var start = i
-                if i >= 2, tokens[i - 2] == "go", tokens[i - 1] == "to" { start = i - 2 }
-                matches.append(Match(command: .goToMeasure(p.value), start: start, end: j + p.consumed, priority: priority))
-            }
-            // Ordinal before the keyword: "the third bar", "12th measure".
-            if ordinalMeasureKeywords.contains(tokens[i]) {
-                for s in max(0, i - 5)..<i {
-                    if let p = NumberWords.scan(tokens, from: s, allowHomophones: false),
-                       p.isOrdinal, s + p.consumed == i {
-                        matches.append(Match(command: .goToMeasure(p.value), start: s, end: i + 1, priority: priority))
-                        break
-                    }
-                }
-            }
-        }
+        matches += speedMatches(in: tokens, priority: phrases.count)
         return matches
     }
 
@@ -246,37 +201,36 @@ public struct VoiceCommandParser: Sendable {
         let table: [(VoiceCommand, [String])] = [
             (.play, ["play", "start", "go", "continue", "resume", "keep going", "keep playing", "lets go", "unpause",
                      "dont stop", "do not stop", "dont pause"]),
-            (.pause, ["pause", "stop", "wait", "hold on", "hang on", "freeze"]),
-            (.slower, ["slower", "slow down", "too fast", "slow"]),
-            (.faster, ["faster", "speed up", "speed it up", "too slow", "quicker", "hurry up"]),
+            (.pause, ["pause", "stop", "wait", "hold on", "hang on", "freeze", "stop it", "stop please"]),
+            (.slower, ["slower", "slow down", "too fast", "slow", "reduce speed", "reduce the speed", "decrease speed",
+                       "decrease the speed", "lower the speed", "lower speed", "less speed", "slow it down"]),
+            (.faster, ["faster", "speed up", "speed it up", "too slow", "quicker", "hurry up", "increase speed",
+                       "increase the speed", "raise the speed", "more speed", "higher speed"]),
             (.normalSpeed, ["normal speed", "regular speed", "full speed", "original speed", "normal"]),
             (.setSpeed(0.5), ["half speed"]),
             (.setSpeed(0.25), ["quarter speed"]),
             (.setSpeed(0.75), ["three quarter speed", "three quarters speed"]),
             (.setSpeed(2.0), ["double speed"]),
-            (.showMusic, ["show the music", "show music", "show the notes", "show notes", "show the sheet",
-                          "show sheet music", "show the sheet music", "show me the music", "show me the notes",
-                          "show me the sheet music", "see the music", "sheet music", "music please", "open the music"]),
-            (.hideMusic, ["hide the music", "hide music", "hide the notes", "hide notes", "close the music",
-                          "no music", "no music please", "hide the sheet", "hide the sheet music", "hide sheet music",
-                          "close the sheet music"]),
-            (.followMe, ["follow me", "follow along", "follow mode"]),
-            (.waitForMe, ["wait for me", "wait mode"]),
-            (.coachOff, ["coach off", "stop following", "free play", "turn off the coach", "turn the coach off"]),
-            (.goBack, ["go back", "back", "rewind", "back up", "go backwards"]),
-            (.goForward, ["go forward", "skip ahead", "skip", "forward"]),
-            (.again, ["again", "one more time", "repeat", "do it again", "try again"]),
-            (.restart, ["from the top", "start over", "from the beginning", "the beginning", "restart", "start again",
-                        "from the start", "back to the start"]),
-            (.loopThis, ["loop this", "loop", "practice this part", "repeat this part", "loop this part"]),
-            (.stopLoop, ["stop loop", "stop looping", "no loop", "loop off", "end loop", "stop the loop", "stop repeating",
-                         "no more loop", "no more looping"]),
-            (.soundOn, ["sound on", "unmute", "turn on the sound", "turn the sound on", "sound back on", "louder", "turn it up"]),
+            (.listen, ["listen", "play the song", "play it for me", "play the music", "show me", "show me how",
+                       "let me hear", "let me listen", "demo", "watch"]),
+            (.showNotes, ["show the notes", "show notes", "show me the notes", "show the music", "show music",
+                          "show me the music", "sheet music", "show the sheet music", "show the staff", "notes view",
+                          "read the notes"]),
+            (.showKeys, ["show the keys", "show keys", "show me the keys", "show the keyboard", "show the piano",
+                         "keys view", "hide the notes", "hide the music", "no music"]),
+            (.hands(.right), ["right hand", "right hand only", "just the right hand", "only the right hand"]),
+            (.hands(.left), ["left hand", "left hand only", "just the left hand", "only the left hand"]),
+            (.hands(.both), ["both hands", "two hands", "all hands", "both"]),
+            (.again, ["again", "one more time", "repeat", "do it again", "try again", "from the top", "start over",
+                      "from the beginning", "the beginning", "restart", "start again", "from the start",
+                      "back to the start", "play again", "play it again"]),
+            (.soundOn, ["sound on", "unmute", "turn on the sound", "turn the sound on", "sound back on", "louder",
+                        "turn it up"]),
             (.soundOff, ["sound off", "mute", "turn off the sound", "turn the sound off", "quiet", "silence"]),
             (.help, ["help", "what can i say", "what can you do", "what do i say"]),
         ]
         let notFollowedBy: [String: Set<String>] = [
-            // "go to measure …" / "let's go to the beginning": wait for the destination instead of playing.
+            // "let's go to the beginning": wait for the destination instead of playing.
             "go": ["to"],
             "lets go": ["to"],
         ]

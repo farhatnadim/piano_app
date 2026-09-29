@@ -22,6 +22,7 @@ jobs:
       - name: Show toolchain
         run: xcodebuild -version && swift --version
       - name: Test PianoCoachCore
+        # Includes the Core ML transcription test, which runs the app's Basic Pitch model on synthesized piano.
         run: swift test --package-path Packages/PianoCoachCore
 
   app:
@@ -60,14 +61,14 @@ jobs:
           echo "::endgroup::"
           tail -n 20 build.log
           exit $STATUS
-      - name: Check bundled web assets
+      - name: Check bundled resources
         run: |
           APP=$(find build/Build/Products -maxdepth 3 -name "PianoCoach.app" | head -1)
           echo "App: $APP"
           find "$APP" -path "*WebAssets*" | sort
-          find "$APP" -name "sheet.html" | grep -q WebAssets
           find "$APP" -name "youtube_player.html" | grep -q WebAssets
-          find "$APP" -name "opensheetmusicdisplay.min.js" | grep -q WebAssets
+          # The note model, compiled by Xcode from PianoCoach/Models/BasicPitchNMP.mlpackage.
+          find "$APP" -name "BasicPitchNMP.mlmodelc" -maxdepth 4 | tee /dev/stderr | grep -q .
 
   ipad-screenshots:
     name: iPad screenshots
@@ -118,6 +119,7 @@ jobs:
           shoot 2-notes 15 -screenshot-demo notes
           shoot 3-start 8 -screenshot-demo start
           shoot 6-library 8
+          shoot 7-learn 8 -screenshot-demo learn
           # iPad apps that support multitasking can't rotate themselves, so rotate the simulator
           # from its Device menu (needs UI scripting on the runner; skipped if unavailable).
           open -a Simulator --args -CurrentDeviceUDID "$UDID" || true

@@ -52,7 +52,37 @@ public struct SheetAttachment: Codable, Hashable, Sendable {
     }
 }
 
-/// A song the child practises: a YouTube video plus optional sheet music and coaching data.
+/// Where a song's notes came from.
+public enum NotesOrigin: String, Codable, Sendable {
+    /// Transcribed from the sound of the YouTube video.
+    case video
+    /// Transcribed from an audio file the parent chose.
+    case audioFile
+    /// Imported from a MIDI or MusicXML file.
+    case sheetMusic
+}
+
+/// What the app worked out about a song's notes, for the library and the start screen.
+public struct SongInfo: Codable, Hashable, Sendable {
+    public var origin: NotesOrigin
+    /// "G major", when known.
+    public var keyName: String?
+    /// Quarter-note tempo at 100 % speed, when known.
+    public var tempoBPM: Double?
+    public var noteCount: Int
+    public var date: Date
+
+    public init(origin: NotesOrigin, keyName: String? = nil, tempoBPM: Double? = nil, noteCount: Int, date: Date = Date()) {
+        self.origin = origin
+        self.keyName = keyName
+        self.tempoBPM = tempoBPM
+        self.noteCount = noteCount
+        self.date = date
+    }
+}
+
+/// A song the child practises: a YouTube video, the notes the app learned from it (or imported), and the
+/// child's progress. (The video-pacing fields are kept so older libraries still load.)
 public struct Piece: Codable, Hashable, Identifiable, Sendable {
     public var id: UUID
     public var title: String
@@ -83,12 +113,14 @@ public struct Piece: Codable, Hashable, Identifiable, Sendable {
     public var game: GameProgress?
     /// 1...5 difficulty of the song's notes, once known (for the library and suggestions).
     public var difficulty: Int?
+    /// Key, tempo and origin of the notes in `sheet`, when the app learned or imported them.
+    public var songInfo: SongInfo?
 
     public init(id: UUID = UUID(), title: String, videoID: String, createdAt: Date = Date(),
                 lastPracticedAt: Date? = nil, sheet: SheetAttachment? = nil, displaySheet: SheetAttachment? = nil,
                 videoBPM: Double? = nil, syncMap: SyncMap? = nil, hasLearnedTrack: Bool = false,
                 loop: LoopRange? = nil, preferredMode: CoachMode = .waitForMe, resumeTime: Double = 0,
-                manualRate: Double = 1, game: GameProgress? = nil, difficulty: Int? = nil) {
+                manualRate: Double = 1, game: GameProgress? = nil, difficulty: Int? = nil, songInfo: SongInfo? = nil) {
         self.id = id
         self.title = title
         self.videoID = videoID
@@ -105,6 +137,7 @@ public struct Piece: Codable, Hashable, Identifiable, Sendable {
         self.manualRate = manualRate
         self.game = game
         self.difficulty = difficulty
+        self.songInfo = songInfo
     }
 
     /// The attachment to display as sheet music, if any.

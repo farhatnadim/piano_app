@@ -131,34 +131,64 @@ struct CheerBubble: View {
     }
 }
 
-/// Shown instead of the HUD while the built-in piano plays the song.
+/// Shown instead of the HUD while the built-in piano plays the song ("Watch"): pause, speed, stop.
 struct DemoBar: View {
     let game: GameController
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Image(systemName: "ear.fill")
-                    .font(.title3)
-                    .foregroundStyle(.tint)
-                Text("Listen to the song…")
+            HStack(spacing: 10) {
+                Button { game.toggleDemoPause() } label: {
+                    Image(systemName: game.isDemoPaused ? "play.fill" : "pause.fill")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 40, height: 40)
+                        .background { Circle().fill(Color.accentColor) }
+                        .contentShape(Circle())
+                }
+                .buttonStyle(PressableButtonStyle())
+                .gameHoverEffect()
+                .macKeyboardShortcut(.space)
+                .accessibilityLabel(game.isDemoPaused ? "Play" : "Pause")
+                Text(game.isDemoPaused ? "Stopped — say “play” to go on" : "Listen and watch the keys…")
                     .font(.headline)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 Spacer(minLength: 8)
+                speedControl
                 Button { game.stopDemo() } label: {
-                    Label("Stop", systemImage: "stop.fill")
+                    Label("Done", systemImage: "xmark")
                         .font(.headline)
-                        .padding(.horizontal, 6)
+                        .padding(.horizontal, 4)
                         .frame(minHeight: 36)
                 }
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.capsule)
-                .macKeyboardShortcut(.space)
             }
             .padding(.horizontal, 16)
             .frame(height: 56)
             GameProgressBar(game: game)
         }
+    }
+
+    private var speedControl: some View {
+        HStack(spacing: 4) {
+            Button { game.changeSpeed(by: -0.1) } label: {
+                Image(systemName: "tortoise.fill").frame(width: 30, height: 30)
+            }
+            .accessibilityLabel("Slower")
+            Text(verbatim: "\(Int((game.startSpeed * 100).rounded())) %")
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .frame(minWidth: 44)
+            Button { game.changeSpeed(by: 0.1) } label: {
+                Image(systemName: "hare.fill").frame(width: 30, height: 30)
+            }
+            .accessibilityLabel("Faster")
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .controlSize(.small)
     }
 }
 
@@ -169,7 +199,7 @@ struct StartPanel: View {
     @Environment(AppModel.self) private var model
     @Bindable var game: GameController
     let chart: NoteChart
-    /// Opens the piece's setup, to add sheet music.
+    /// Shows the learn screen, to learn the song again from the video.
     var onAddSheetMusic: () -> Void
 
     var body: some View {
@@ -178,9 +208,9 @@ struct StartPanel: View {
                 VStack(alignment: .leading, spacing: 20) {
                     header
                     if chart.source == .listening {
-                        NoticeBanner("Made by listening to the video — some notes may be off. Add sheet music for exact notes.",
+                        NoticeBanner("These notes were made the old way and may be off. Learn the song again for better notes.",
                                      systemImage: "ear", accessory: {
-                            Button("Add sheet music", action: onAddSheetMusic)
+                            Button("Learn again", action: onAddSheetMusic)
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
                         })
@@ -203,6 +233,11 @@ struct StartPanel: View {
             Text(model.openPiece?.title ?? chart.title)
                 .font(.title2.weight(.bold))
                 .lineLimit(2)
+            if let info = model.openPiece?.songInfo {
+                Text(songInfoText(info))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
             HStack(spacing: 16) {
                 if let level = game.difficulty?.level {
                     HStack(spacing: 6) {
@@ -225,6 +260,19 @@ struct StartPanel: View {
             }
             .font(.subheadline)
         }
+    }
+
+    private func songInfoText(_ info: SongInfo) -> String {
+        var parts: [String] = []
+        switch info.origin {
+        case .video: parts.append("Learned from the video")
+        case .audioFile: parts.append("Learned from an audio file")
+        case .sheetMusic: parts.append("From sheet music")
+        }
+        if let key = info.keyName { parts.append(key) }
+        if let bpm = info.tempoBPM { parts.append("\(Int(bpm.rounded())) beats a minute") }
+        parts.append("\(info.noteCount) notes")
+        return parts.joined(separator: " · ")
     }
 
     private func modeTile(_ mode: GameMode, systemImage: String, explanation: String) -> some View {
@@ -262,6 +310,18 @@ struct StartPanel: View {
 
     private var options: some View {
         VStack(alignment: .leading, spacing: 14) {
+            OptionRow(title: "Version", systemImage: "music.note.list") {
+                Picker("Version", selection: $game.rendition) {
+                    ForEach(Rendition.allCases, id: \.self) { rendition in
+                        Text(rendition.displayName).tag(rendition)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                Text(game.rendition.description)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             // Side by side when there's room (iPad, Mac), one above the other on iPhone.
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 16) {
@@ -346,7 +406,7 @@ struct StartPanel: View {
             .macKeyboardShortcut(.space)
             .help("Start (space)")
             Button { game.playDemo() } label: {
-                Label("Listen first", systemImage: "ear")
+                Label("Watch and listen", systemImage: "ear")
                     .font(.headline)
                     .frame(maxWidth: .infinity, minHeight: 36)
             }
@@ -356,8 +416,8 @@ struct StartPanel: View {
     }
 
     private var inputLine: some View {
-        let coach = model.coach
-        let usesMIDI = coach.noteSource == .midiKeyboard
+        let input = model.input
+        let usesMIDI = input.noteSource == .midiKeyboard
         return VStack(alignment: .leading, spacing: 8) {
             Label(usesMIDI ? "Playing on a MIDI keyboard" : "Listening with the microphone",
                   systemImage: usesMIDI ? "pianokeys" : "mic.fill")
@@ -370,7 +430,7 @@ struct StartPanel: View {
             Text("You can also tap the keys on the screen, or type A W S E D F T G Y H U J K on a keyboard.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-            if let error = coach.listeningError {
+            if let error = input.listeningError {
                 NoticeBanner(error, style: .warning, systemImage: "mic.slash.fill")
             }
         }
@@ -629,7 +689,8 @@ private struct StatTile: View {
 
 // MARK: - No song yet
 
-/// The game needs the song's notes: listen to the video, or add sheet music.
+/// The chosen version of the song has no notes (e.g. "Just the tune" of a left-hand piece), or the song
+/// has none yet.
 struct NoSongPanel: View {
     @Environment(AppModel.self) private var model
     var onAddSheetMusic: () -> Void
@@ -641,34 +702,29 @@ struct NoSongPanel: View {
                     Image(systemName: "music.quarternote.3")
                         .font(.system(size: 56, weight: .semibold))
                         .foregroundStyle(.tint)
-                    Text("Let's get the notes!")
-                        .font(.title.weight(.bold))
-                        .multilineTextAlignment(.center)
-                    Text("The game needs this song's notes. Piano Coach can listen to the video and work them out, or you can add sheet music for exact notes.")
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button { model.buildGameByListening() } label: {
-                        Label("Listen to the video to make the game", systemImage: "ear")
-                            .font(.headline)
+                    if model.game.fullChart != nil {
+                        Text("This version has no notes")
+                            .font(.title.weight(.bold))
                             .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity, minHeight: 50)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.capsule)
-                    Button(action: onAddSheetMusic) {
-                        Label("Add sheet music (MIDI or MusicXML)", systemImage: "doc.badge.plus")
-                            .font(.headline)
+                        Button { model.game.rendition = .full } label: {
+                            Label("Play everything", systemImage: "music.note.list")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity, minHeight: 50)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.capsule)
+                    } else {
+                        Text("Let's get the notes!")
+                            .font(.title.weight(.bold))
                             .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity, minHeight: 36)
+                        Button(action: onAddSheetMusic) {
+                            Label("Learn the song", systemImage: "ear")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity, minHeight: 50)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.capsule)
                     }
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.capsule)
-                    Text("Listening works best in a quiet room, while the video plays once from start to end.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }

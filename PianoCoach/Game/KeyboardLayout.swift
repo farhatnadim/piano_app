@@ -1,91 +1,98 @@
+import Foundation
 import PianoCoachCore
-import SwiftUI
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
-/// The piano keys a game shows and where each one is drawn.
+/// Where the keys of a real 88-key piano (A0 to C8) are drawn, and which part of the keyboard is in view.
 ///
-/// The falling notes and the keyboard share one layout, so every note falls exactly onto its key.
+/// Places on the piano are measured in white keys from A0's left edge, so C8's right edge is at 52. The view
+/// shows a window of the keyboard `visibleWhiteKeys` wide, starting at `visibleStart`. Both may be fractional,
+/// so the window can pan and zoom smoothly; keys cut by its edges are drawn in part. The falling notes, the
+/// keyboard and the minimap share one layout, so every note falls exactly onto its key.
 struct KeyboardLayout: Equatable {
-    /// Lowest and highest key shown (MIDI numbers).
-    let lowest: Int
-    let highest: Int
-    /// The white keys shown, left to right.
-    let whiteKeys: [Int]
-    /// For every key from `lowest` to `highest`: how many white keys lie to its left.
-    private let whiteKeysBefore: [Int]
+    static let lowestKey = Pitch.lowestPianoMIDI
+    static let highestKey = Pitch.highestPianoMIDI
+    static let whiteKeyTotal = 52
 
     /// Black keys cover this fraction of the keyboard's height.
     static let blackKeyDepth: CGFloat = 0.62
     /// Width of a black key relative to a white key.
     static let blackKeyWidth: CGFloat = 0.58
 
-    /// Keys for a chart: its notes plus two semitones each side, widened to whole octaves (C to B), at
-    /// least two octaves, and never beyond a real piano (A0 to C8).
-    init(chart: NoteChart?) {
-        guard let chart, !chart.isEmpty else {
-            self.init(lowest: 48, highest: 83)
-            return
-        }
-        var low = chart.lowestMIDI - 2
-        var high = chart.highestMIDI + 2
-        low -= Pitch.pitchClass(low)
-        high += 11 - Pitch.pitchClass(high)
-        // Grow by whole octaves towards middle C, so it tends to stay in view.
-        let middle = Double(chart.lowestMIDI + chart.highestMIDI) / 2
-        while high - low + 1 < 24 {
-            if middle >= 60 { low -= 12 } else { high += 12 }
-        }
-        low = max(Pitch.lowestPianoMIDI, low)
-        high = min(Pitch.highestPianoMIDI, high)
-        if high - low + 1 < 24 {
-            if low == Pitch.lowestPianoMIDI {
-                high = low + 23
-                high = min(Pitch.highestPianoMIDI, high + 11 - Pitch.pitchClass(high))
-            } else {
-                low = max(Pitch.lowestPianoMIDI, high - 23)
-            }
-        }
-        self.init(lowest: low, highest: high)
+    /// Left edge of the window, in white keys from A0's left edge.
+    let visibleStart: Double
+    /// Width of the window, in white keys.
+    let visibleWhiteKeys: Double
+
+    static let wholeKeyboard = KeyboardLayout(visibleStart: 0, visibleWhiteKeys: Double(whiteKeyTotal))
+
+    /// A window `visibleWhiteKeys` wide (one key to all 52) from `visibleStart`, kept on the piano.
+    init(visibleStart: Double, visibleWhiteKeys: Double) {
+        let total = Double(Self.whiteKeyTotal)
+        let width = visibleWhiteKeys.isFinite ? min(total, max(1, visibleWhiteKeys)) : total
+        self.visibleWhiteKeys = width
+        self.visibleStart = visibleStart.isFinite ? min(total - width, max(0, visibleStart)) : 0
     }
 
-    /// Keys from `lowest` to `highest`, moved outwards onto white keys if needed.
+    /// Exactly the keys from `lowest` to `highest` (kept on the piano).
     init(lowest: Int, highest: Int) {
-        var low = max(0, min(lowest, highest))
-        var high = min(127, max(lowest, highest))
-        if NoteSpelling.isBlackKey(low) { low -= 1 }
-        if NoteSpelling.isBlackKey(high) { high += 1 }
-        self.lowest = low
-        self.highest = high
-        var whites: [Int] = []
-        var before: [Int] = []
-        for midi in low...high {
-            before.append(whites.count)
-            if !NoteSpelling.isBlackKey(midi) { whites.append(midi) }
-        }
-        whiteKeys = whites
-        whiteKeysBefore = before
+        let low = Self.extent(of: max(Self.lowestKey, min(lowest, highest)))
+        let high = Self.extent(of: min(Self.highestKey, max(lowest, highest)))
+        self.init(visibleStart: low.lowerBound, visibleWhiteKeys: high.upperBound - low.lowerBound)
     }
 
-    var whiteKeyCount: Int { whiteKeys.count }
+    var visibleEnd: Double { visibleStart + visibleWhiteKeys }
 
-    func contains(_ midi: Int) -> Bool { midi >= lowest && midi <= highest }
+    var showsWholeKeyboard: Bool { visibleWhiteKeys >= Double(Self.whiteKeyTotal) - 1e-6 }
+
+    /// The keys at least partly in view, lowest to highest.
+    var visibleKeys: ClosedRange<Int> {
+        var low = Self.whiteKeyMIDI[min(Self.whiteKeyTotal - 1, max(0, Int(visibleStart.rounded(.down))))]
+        if low > Self.lowestKey, Self.isBlackKey(low - 1), Self.extent(of: low - 1).upperBound > visibleStart {
+            low -= 1
+        }
+        var high = Self.whiteKeyMIDI[min(Self.whiteKeyTotal - 1, max(0, Int(visibleEnd.rounded(.up)) - 1))]
+        if high < Self.highestKey, Self.isBlackKey(high + 1), Self.extent(of: high + 1).lowerBound < visibleEnd {
+            high += 1
+        }
+        return low...high
+    }
+
+    /// The keys in view in words, for VoiceOver: "All 88 keys", or "C3 to E5".
+    var keysInView: String {
+        if showsWholeKeyboard { return "All 88 keys" }
+        let keys = visibleKeys
+        return NoteSpelling.spell(keys.lowerBound).nameWithOctave + " to "
+            + NoteSpelling.spell(keys.upperBound).nameWithOctave
+    }
+
+    /// Whether a key is at least partly in view.
+    func contains(_ midi: Int) -> Bool {
+        guard Self.isOnPiano(midi) else { return false }
+        let extent = Self.extent(of: midi)
+        return extent.upperBound > visibleStart && extent.lowerBound < visibleEnd
+    }
 
     /// Width of one white key on a keyboard `width` points wide.
     func whiteKeyWidth(forWidth width: CGFloat) -> CGFloat {
-        width / CGFloat(max(1, whiteKeys.count))
+        width / CGFloat(visibleWhiteKeys)
     }
 
-    /// Where a key is drawn on a keyboard `width` points wide (black keys are narrower and sit between
-    /// white keys, shifted a little the way a real piano's are). Nil for keys that aren't shown.
+    /// x of a place on the piano (in white keys from A0's left edge) on a keyboard `width` points wide.
+    func x(atPianoPosition position: Double, width: CGFloat) -> CGFloat {
+        CGFloat(position - visibleStart) * whiteKeyWidth(forWidth: width)
+    }
+
+    /// Where a key is drawn on a keyboard `width` points wide (black keys are narrower and sit between white
+    /// keys, shifted a little the way a real piano's are). Keys cut by the window's edges reach past 0 or
+    /// `width`. Nil for keys that are out of view or not on a piano.
     func span(of midi: Int, width: CGFloat) -> KeySpan? {
         guard contains(midi) else { return nil }
-        let white = whiteKeyWidth(forWidth: width)
-        let index = CGFloat(whiteKeysBefore[midi - lowest])
-        guard NoteSpelling.isBlackKey(midi) else {
-            return KeySpan(x: index * white, width: white, isBlack: false)
-        }
-        let blackWidth = white * Self.blackKeyWidth
-        let center = index * white + Self.blackKeyShift(midi) * white
-        return KeySpan(x: center - blackWidth / 2, width: blackWidth, isBlack: true)
+        let extent = Self.extent(of: midi)
+        let left = x(atPianoPosition: extent.lowerBound, width: width)
+        let right = x(atPianoPosition: extent.upperBound, width: width)
+        return KeySpan(x: left, width: right - left, isBlack: Self.isBlackKey(midi))
     }
 
     /// The key under `point` on a keyboard of `size` (black keys win in their upper part).
@@ -93,21 +100,58 @@ struct KeyboardLayout: Equatable {
         guard size.width > 0, point.x >= 0, point.x < size.width, point.y >= 0, point.y <= size.height else {
             return nil
         }
-        let white = whiteKeyWidth(forWidth: size.width)
-        let index = min(whiteKeys.count - 1, max(0, Int(point.x / white)))
-        let whiteKey = whiteKeys[index]
+        let position = visibleStart + Double(point.x / whiteKeyWidth(forWidth: size.width))
+        let index = min(Self.whiteKeyTotal - 1, max(0, Int(position.rounded(.down))))
+        let whiteKey = Self.whiteKeyMIDI[index]
         if point.y < size.height * Self.blackKeyDepth {
-            for midi in [whiteKey - 1, whiteKey + 1] where contains(midi) && NoteSpelling.isBlackKey(midi) {
-                if let span = span(of: midi, width: size.width), point.x >= span.x, point.x < span.maxX {
-                    return midi
-                }
+            // A black key reaches less than half a white key past the gap it sits in.
+            for midi in [whiteKey - 1, whiteKey + 1] where Self.isOnPiano(midi) && Self.isBlackKey(midi) {
+                let extent = Self.extent(of: midi)
+                if position >= extent.lowerBound && position < extent.upperBound { return midi }
             }
         }
         return whiteKey
     }
 
+    // MARK: - The piano
+
+    static func isOnPiano(_ midi: Int) -> Bool { midi >= lowestKey && midi <= highestKey }
+
+    /// True for the black keys (without allocating, unlike `NoteSpelling.isBlackKey`; this runs every frame).
+    static func isBlackKey(_ midi: Int) -> Bool {
+        switch Pitch.pitchClass(midi) {
+        case 1, 3, 6, 8, 10: return true
+        default: return false
+        }
+    }
+
+    /// Left and right edges of a key, in white keys from A0's left edge (keys off the piano: the nearest end).
+    static func extent(of midi: Int) -> ClosedRange<Double> {
+        extents[max(lowestKey, min(highestKey, midi)) - lowestKey]
+    }
+
+    /// The white keys, A0 to C8.
+    static let whiteKeyMIDI: [Int] = (lowestKey...highestKey).filter { !isBlackKey($0) }
+
+    /// `extent(of:)` for every key, A0 to C8.
+    private static let extents: [ClosedRange<Double>] = {
+        var result: [ClosedRange<Double>] = []
+        var whitesBefore = 0
+        for midi in lowestKey...highestKey {
+            if isBlackKey(midi) {
+                let center = Double(whitesBefore) + blackKeyShift(midi)
+                let half = Double(blackKeyWidth) / 2
+                result.append((center - half)...(center + half))
+            } else {
+                result.append(Double(whitesBefore)...Double(whitesBefore + 1))
+                whitesBefore += 1
+            }
+        }
+        return result
+    }()
+
     /// Offset of a black key's centre from the gap between its white neighbours, in white-key widths.
-    private static func blackKeyShift(_ midi: Int) -> CGFloat {
+    private static func blackKeyShift(_ midi: Int) -> Double {
         switch Pitch.pitchClass(midi) {
         case 1: return -0.1   // C♯
         case 3: return 0.1    // D♯

@@ -37,13 +37,10 @@ final class YouTubePlayerController {
 
     /// Called after every position/state report (about 10 times per second while ready).
     @ObservationIgnored var onUpdate: (() -> Void)?
-    /// Called when playback starts (`true`) or pauses (`false`) through YouTube's own controls rather than the app.
-    @ObservationIgnored var onExternalPlayPause: ((Bool) -> Void)?
 
     let webView: WKWebView
     private let messageProxy = ScriptMessageProxy()
     private let navigationHandler = NavigationHandler()
-    @ObservationIgnored private var lastPlayPauseRequest: (playing: Bool, time: TimeInterval)?
     @ObservationIgnored private var pageTemplate: String?
 
     init() {
@@ -131,12 +128,10 @@ final class YouTubePlayerController {
 
     func play() {
         autoplayBlocked = false
-        lastPlayPauseRequest = (true, ProcessInfo.processInfo.systemUptime)
         run("PianoPlayer.play()")
     }
 
     func pause() {
-        lastPlayPauseRequest = (false, ProcessInfo.processInfo.systemUptime)
         run("PianoPlayer.pause()")
     }
 
@@ -160,15 +155,6 @@ final class YouTubePlayerController {
     func setMuted(_ muted: Bool) {
         isMuted = muted
         run("PianoPlayer.setMuted(\(muted ? "true" : "false"))")
-    }
-
-    func apply(_ command: PlayerCommand) {
-        switch command {
-        case .play: play()
-        case .pause: pause()
-        case .setRate(let r): setRate(r)
-        case .seek(let t): seek(to: t)
-        }
     }
 
     private func run(_ script: String) {
@@ -213,19 +199,7 @@ final class YouTubePlayerController {
 
     private func updateState(_ raw: Int) {
         guard let newState = PlaybackState(rawValue: raw), newState != state else { return }
-        let old = state
         state = newState
-        let now = ProcessInfo.processInfo.systemUptime
-        let recentlyRequested: (Bool) -> Bool = { playing in
-            guard let r = self.lastPlayPauseRequest else { return false }
-            return r.playing == playing && now - r.time < 2.0
-        }
-        if newState == .paused && old == .playing && !recentlyRequested(false) {
-            onExternalPlayPause?(false)
-        } else if newState == .playing && (old == .paused || old == .cued || old == .unstarted || old == .ended)
-                    && !recentlyRequested(true) {
-            onExternalPlayPause?(true)
-        }
     }
 
     static func describeError(_ code: Int) -> String {

@@ -287,8 +287,8 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Piano Coach uses Bluetooth to connect to a Bluetooth MIDI keyboard or digital piano, so it knows exactly which notes are played.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Piano Coach listens to the piano to hear which notes you play in the game and to keep the video in step with you. It also hears voice commands like \"slower\" and \"pause\".";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Lets you control the video with your voice, like \"slower\", \"pause\" or \"show the music\". This happens on the device when possible; otherwise Apple's speech service is used.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Piano Coach listens to the piano to hear which notes you play in the game, and hears voice commands like \"play\", \"stop\" and \"slower\". If it can't record a video's sound directly, it listens to the video through the microphone to learn the song.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Lets you control the game with your voice, like \"play\", \"stop\", \"slower\" or \"faster\". This happens on the device when possible; otherwise Apple's speech service is used.";
 				"INFOPLIST_FILE[sdk=iphoneos*]" = "Config/iOS-Info.plist";
 				"INFOPLIST_FILE[sdk=iphonesimulator*]" = "Config/iOS-Info.plist";
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -339,8 +339,8 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Piano Coach uses Bluetooth to connect to a Bluetooth MIDI keyboard or digital piano, so it knows exactly which notes are played.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Piano Coach listens to the piano to hear which notes you play in the game and to keep the video in step with you. It also hears voice commands like \"slower\" and \"pause\".";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Lets you control the video with your voice, like \"slower\", \"pause\" or \"show the music\". This happens on the device when possible; otherwise Apple's speech service is used.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Piano Coach listens to the piano to hear which notes you play in the game, and hears voice commands like \"play\", \"stop\" and \"slower\". If it can't record a video's sound directly, it listens to the video through the microphone to learn the song.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Lets you control the game with your voice, like \"play\", \"stop\", \"slower\" or \"faster\". This happens on the device when possible; otherwise Apple's speech service is used.";
 				"INFOPLIST_FILE[sdk=iphoneos*]" = "Config/iOS-Info.plist";
 				"INFOPLIST_FILE[sdk=iphonesimulator*]" = "Config/iOS-Info.plist";
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;

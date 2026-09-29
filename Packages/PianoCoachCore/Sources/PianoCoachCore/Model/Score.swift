@@ -94,13 +94,16 @@ public struct ScoreNote: Codable, Hashable, Sendable {
     public var hand: Hand
     /// Performance-order measure index.
     public var measureIndex: Int
+    /// How hard the note is struck, 0...1 (MIDI velocity / 127); nil when the source doesn't say.
+    public var velocity: Double?
 
-    public init(midi: Int, beat: Double, durationBeats: Double, hand: Hand, measureIndex: Int) {
+    public init(midi: Int, beat: Double, durationBeats: Double, hand: Hand, measureIndex: Int, velocity: Double? = nil) {
         self.midi = midi
         self.beat = beat
         self.durationBeats = durationBeats
         self.hand = hand
         self.measureIndex = measureIndex
+        self.velocity = velocity
     }
 }
 

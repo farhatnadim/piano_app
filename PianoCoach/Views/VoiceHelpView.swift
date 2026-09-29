@@ -19,33 +19,24 @@ struct VoiceHelpView: View {
 
     private static let groups: [PhraseGroup] = [
         PhraseGroup(title: "Playing", phrases: [
-            Phrase(words: "Play", detail: "Start the video. “Keep going” works too.", symbol: "play.fill"),
-            Phrase(words: "Pause", detail: "Stop the video. Or say “stop” or “wait”.", symbol: "pause.fill"),
-            Phrase(words: "Again", detail: "Play that part one more time.", symbol: "arrow.counterclockwise"),
-            Phrase(words: "From the top", detail: "Start the piece from the beginning.", symbol: "backward.end.fill"),
+            Phrase(words: "Play", detail: "Start the game, or carry on. “Go” and “keep going” work too.", symbol: "play.fill"),
+            Phrase(words: "Stop", detail: "Stop right where you are. Or say “pause” or “wait”.", symbol: "pause.fill"),
+            Phrase(words: "Again", detail: "Start the song over. “From the top” works too.", symbol: "arrow.counterclockwise"),
+            Phrase(words: "Listen", detail: "The piano plays the song while the keys light up.", symbol: "ear"),
         ]),
         PhraseGroup(title: "Speed", phrases: [
-            Phrase(words: "Slower", detail: "Make the video a bit slower.", symbol: "tortoise.fill"),
-            Phrase(words: "Faster", detail: "Make the video a bit faster.", symbol: "hare.fill"),
-            Phrase(words: "Normal speed", detail: "Back to the real speed.", symbol: "speedometer"),
+            Phrase(words: "Slower", detail: "A little slower. Or “reduce speed”, “too fast”.", symbol: "tortoise.fill"),
+            Phrase(words: "Faster", detail: "A little faster. Or “increase speed”, “too slow”.", symbol: "hare.fill"),
+            Phrase(words: "Normal speed", detail: "The song's real speed.", symbol: "speedometer"),
             Phrase(words: "Half speed", detail: "Or say a number, like “speed 75”.", symbol: "gauge.with.dots.needle.33percent"),
         ]),
-        PhraseGroup(title: "Music", phrases: [
-            Phrase(words: "Show the music", detail: "Show the sheet music.", symbol: "music.note.list"),
-            Phrase(words: "Hide the music", detail: "Hide the sheet music.", symbol: "eye.slash"),
+        PhraseGroup(title: "What you see", phrases: [
+            Phrase(words: "Show the notes", detail: "The notes on a music staff.", symbol: "music.note.list"),
+            Phrase(words: "Show the keys", detail: "Notes falling onto the piano keys.", symbol: "pianokeys"),
+            Phrase(words: "Right hand", detail: "Practise one hand. “Left hand” and “both hands” work too.", symbol: "hand.raised.fill"),
         ]),
-        PhraseGroup(title: "Moving around", phrases: [
-            Phrase(words: "Go back", detail: "Jump back a little.", symbol: "gobackward"),
-            Phrase(words: "Skip ahead", detail: "Jump forward a little.", symbol: "goforward"),
-            Phrase(words: "Measure twelve", detail: "Jump to a measure (needs sheet music). “Bar 12” works too.", symbol: "number"),
-            Phrase(words: "Loop this", detail: "Keep repeating this part.", symbol: "repeat"),
-            Phrase(words: "Stop looping", detail: "Carry on without repeating.", symbol: "arrow.right"),
-        ]),
-        PhraseGroup(title: "Coach", phrases: [
-            Phrase(words: "Wait for me", detail: "The video waits when you stop playing.", symbol: "hourglass"),
-            Phrase(words: "Follow me", detail: "The video follows your speed.", symbol: "figure.walk"),
-            Phrase(words: "Coach off", detail: "The video plays normally.", symbol: "power"),
-            Phrase(words: "Sound off", detail: "Mute the video. “Sound on” brings it back.", symbol: "speaker.slash.fill"),
+        PhraseGroup(title: "More", phrases: [
+            Phrase(words: "Sound off", detail: "Mute the app's piano. “Sound on” brings it back.", symbol: "speaker.slash.fill"),
             Phrase(words: "What can I say?", detail: "Shows this list.", symbol: "questionmark.circle"),
         ]),
     ]
@@ -90,7 +81,7 @@ struct VoiceHelpView: View {
             return "Voice commands are turned off. A grown-up can turn them on in Settings."
         }
         if model.settings.requireWakeWord {
-            return "Start with “Coach”, like “Coach, slower” or “Coach, measure twelve”."
+            return "Start with “Coach”, like “Coach, slower” or “Coach, play”."
         }
         return "Just say it out loud. You can also start with “Coach”, like “Coach, slower”."
     }

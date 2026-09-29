@@ -2,7 +2,8 @@ import PianoCoachCore
 import SwiftUI
 
 /// The notes falling towards the keyboard: one bar per note in its key's lane, reaching the hit line at
-/// the bottom exactly when it should be played. Drawn in a single Canvas every frame.
+/// the bottom exactly when it should be played. Drawn in a single Canvas every frame, through the same
+/// window of the keyboard as the keys below (`layout`), so the lanes pan and zoom with them.
 struct FallingNotesView: View {
     let game: GameController
     let chart: NoteChart
@@ -80,15 +81,16 @@ struct FallingNotesScene {
         drawNotes(in: &context, size: size, pixelsPerBeat: pixelsPerBeat, topBeat: topBeat, y: y)
     }
 
-    /// Faint columns behind the black keys and lines between octaves, so the lanes are easy to follow.
+    /// Faint columns behind the black keys and lines between octaves, so the lanes are easy to follow. They
+    /// move with the keyboard's window.
     private func drawLanes(in context: inout GraphicsContext, size: CGSize) {
         let shade = Color.primary.opacity(isDark ? 0.06 : 0.035)
         let octaveLine = Color.primary.opacity(isDark ? 0.14 : 0.1)
-        for midi in layout.lowest...layout.highest {
+        for midi in layout.visibleKeys {
             guard let span = layout.span(of: midi, width: size.width) else { continue }
             if span.isBlack {
                 context.fill(Path(CGRect(x: span.x, y: 0, width: span.width, height: size.height)), with: .color(shade))
-            } else if Pitch.pitchClass(midi) == 0 && midi != layout.lowest {
+            } else if Pitch.pitchClass(midi) == 0 && span.x > 0.5 {
                 context.fill(Path(CGRect(x: span.x - 0.5, y: 0, width: 1, height: size.height)), with: .color(octaveLine))
             }
         }
@@ -109,11 +111,14 @@ struct FallingNotesScene {
                            y: (Double) -> CGFloat) {
         let hitY = size.height
         let nearBeats = 0.35
-        var letters: [String: GraphicsContext.ResolvedText] = [:]
+        // Resolved once per name and frame, with its size, to label only the bars it fits in.
+        var letters: [String: (text: GraphicsContext.ResolvedText, size: CGSize)] = [:]
         let dimmed = Color.gray.opacity(0.35)
 
         for note in chart.notes {
             if note.time > topBeat { break }
+            // Keys out of the keyboard's window have no lane (the camera keeps upcoming notes in view; notes on
+            // keys cut by the edges are drawn in part).
             guard note.end >= position - 0.05,
                   let lane = layout.span(of: note.midi, width: size.width) else { continue }
             let status = note.id < statuses.count ? statuses[note.id] : .pending
@@ -146,17 +151,19 @@ struct FallingNotesScene {
                 context.fill(bar, with: .color(dimmed))
             }
 
-            // Letter name at the bottom of the bar.
-            if showLetters, rect.height >= 20, rect.width >= 12, status != .notRequired {
+            // Letter name at the bottom of the bar, when the bar is wide enough for it (zoomed-out lanes are thin).
+            if showLetters, rect.height >= 20, rect.width >= 10, status != .notRequired {
                 let name = NoteSpelling.spell(note.midi, keyFifths: chart.keyFifths).name
                 if letters[name] == nil {
                     let fontSize = min(15, max(9, lane.width * 0.42))
-                    letters[name] = context.resolve(Text(name).font(.system(size: fontSize, weight: .bold, design: .rounded)))
+                    let font = Font.system(size: fontSize, weight: .bold, design: .rounded)
+                    let text = context.resolve(Text(name).font(font))
+                    letters[name] = (text, text.measure(in: CGSize(width: 200, height: 100)))
                 }
-                if var text = letters[name] {
-                    text.shading = .color(status == .missed ? Color.primary.opacity(0.6) : .white)
+                if var label = letters[name], label.size.width <= rect.width - 2, label.size.height + 4 <= rect.height {
+                    label.text.shading = .color(status == .missed ? Color.primary.opacity(0.6) : .white)
                     let labelY = min(rect.maxY, hitY) - 4
-                    context.draw(text, at: CGPoint(x: rect.midX, y: labelY), anchor: .bottom)
+                    context.draw(label.text, at: CGPoint(x: rect.midX, y: labelY), anchor: .bottom)
                 }
             }
         }

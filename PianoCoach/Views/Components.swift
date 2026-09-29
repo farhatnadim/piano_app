@@ -123,46 +123,7 @@ extension NoticeBanner where Accessory == EmptyView {
     }
 }
 
-// MARK: - Round controls
-
-/// A round icon with a small caption underneath, used for the big practice buttons.
-struct RoundControlLabel: View {
-    let systemImage: String
-    let caption: String
-    var size: CGFloat = 48
-    /// Filled with the accent color (the main play button).
-    var prominent = false
-    /// Highlighted because the option is switched on (loop, music).
-    var isOn = false
-
-    @Environment(\.isEnabled) private var isEnabled
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: systemImage)
-                .font(.system(size: size * 0.4, weight: .semibold))
-                .frame(width: size, height: size)
-                .foregroundStyle(prominent || isOn ? Color.white : Color.primary)
-                .background { Circle().fill(fill) }
-            Text(caption)
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .fixedSize()
-        }
-        .opacity(isEnabled ? 1 : 0.4)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(caption))
-        .accessibilityAddTraits(isOn ? .isSelected : [])
-    }
-
-    private var fill: AnyShapeStyle {
-        if prominent { return AnyShapeStyle(Color.accentColor) }
-        if isOn { return AnyShapeStyle(Color.accentColor.opacity(0.85)) }
-        return AnyShapeStyle(.quaternary)
-    }
-}
+// MARK: - Buttons
 
 /// Shrinks the label a little while pressed.
 struct PressableButtonStyle: ButtonStyle {
@@ -186,22 +147,6 @@ extension View {
         self
         #endif
     }
-}
-
-extension Color {
-    /// Background for panels next to the main content.
-    static var panelBackground: Color {
-        #if os(iOS)
-        return Color(uiColor: .secondarySystemBackground)
-        #else
-        return Color(nsColor: .windowBackgroundColor)
-        #endif
-    }
-}
-
-/// "Normal" for 1x, otherwise a percentage ("75%").
-func speedName(_ rate: Double) -> String {
-    abs(rate - 1) < 0.001 ? "Normal" : "\(Int((rate * 100).rounded()))%"
 }
 
 /// "1:05" (or "1:05.3" with tenths).

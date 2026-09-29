@@ -30,7 +30,10 @@ struct Cheer: Equatable, Identifiable {
 }
 
 /// Runs the falling-notes game for the open piece: counts in, moves the notes every frame, turns what
-/// the child plays (microphone or MIDI keyboard, via `CoachEngine`) into hits, and reports the result.
+/// the child plays (microphone or MIDI keyboard, via `NoteInput`) into hits, and reports the result.
+///
+/// It also plays the song itself ("Watch"): the built-in piano plays the notes at the chosen speed while they
+/// fall onto the keys — the song's rendition, which can be slowed down or sped up without losing quality.
 @MainActor
 @Observable
 final class GameController {
@@ -44,13 +47,17 @@ final class GameController {
         case playing
         case paused
         case finished
-        /// The built-in piano is playing the song so the child can hear it.
+        /// The built-in piano is playing the song so the child can watch and listen (`isDemoPaused` when stopped).
         case demo
     }
 
     // MARK: Choices (set before a game)
 
     var mode: GameMode = .learn
+    /// Which version of the song: everything, one note per hand, or just the tune.
+    var rendition: Rendition = .full {
+        didSet { if oldValue != rendition { renditionChanged() } }
+    }
     var hands: HandSelection = .both
     var display: GameDisplay = .keys
     var showLetters = true
@@ -63,7 +70,11 @@ final class GameController {
     // MARK: State for drawing
 
     private(set) var phase: Phase = .noChart
+    /// The song's notes as learned or imported; `chart` is the chosen rendition of it.
+    private(set) var fullChart: NoteChart?
     private(set) var chart: NoteChart?
+    /// The Watch playback is stopped where it is (a voice "stop" or the pause button).
+    private(set) var isDemoPaused = false
     private(set) var difficulty: ChartDifficulty?
     /// Playhead in beats: notes whose time equals it are at the line.
     private(set) var position: Double = 0
@@ -92,7 +103,7 @@ final class GameController {
 
     // MARK: Collaborators
 
-    private let coach: CoachEngine
+    private let input: NoteInput
     private let sound: GameSoundPlayer
     @ObservationIgnored private var engine: GameEngine?
     @ObservationIgnored private var timer: Timer?
@@ -108,8 +119,8 @@ final class GameController {
     @ObservationIgnored private var demoEnded: Set<Int> = []
     @ObservationIgnored private var accompanied: Set<Int> = []
 
-    init(coach: CoachEngine, sound: GameSoundPlayer) {
-        self.coach = coach
+    init(input: NoteInput, sound: GameSoundPlayer) {
+        self.input = input
         self.sound = sound
     }
 
@@ -118,15 +129,31 @@ final class GameController {
     /// Sets the song's notes and the child's level on it.
     func load(chart newChart: NoteChart?, progress: GameProgress?) {
         stop()
-        chart = newChart
-        difficulty = newChart.map(ChartDifficulty.estimate)
+        fullChart = newChart
         startSpeed = progress?.speed ?? 0.6
         speed = startSpeed
-        statuses = newChart.map { $0.notes.map { _ in .pending } } ?? []
-        position = firstNoteTime - 4
         result = nil
         levelChange = nil
+        applyRendition()
+    }
+
+    /// Builds `chart` from the full song for the chosen rendition and resets the start screen.
+    private func applyRendition() {
+        let newChart = fullChart.map { $0.rendition(rendition) }.flatMap { $0.isEmpty ? nil : $0 }
+        chart = newChart
+        difficulty = newChart.map(ChartDifficulty.estimate)
+        statuses = newChart.map { $0.notes.map { _ in .pending } } ?? []
+        position = firstNoteTime - 4
         phase = newChart == nil ? .noChart : .ready
+    }
+
+    private func renditionChanged() {
+        guard fullChart != nil else { return }
+        if phase != .ready && phase != .noChart { stop() }
+        result = nil
+        levelChange = nil
+        speed = startSpeed
+        applyRendition()
     }
 
     private var firstNoteTime: Double { chart?.notes.first?.time ?? 0 }
@@ -222,8 +249,9 @@ final class GameController {
     /// Changes the speed during a game (or the starting speed before one).
     func setSpeed(_ value: Double) {
         let clamped = max(0.3, min(1.2, value))
-        if let engine, phase == .playing || phase == .paused {
+        if let engine, phase == .playing || phase == .paused || isCountingIn {
             engine.setSpeed(clamped)
+            speed = engine.speed
         } else {
             startSpeed = clamped
             speed = clamped
@@ -249,6 +277,7 @@ final class GameController {
         }
         demoStarted = []
         demoEnded = []
+        isDemoPaused = false
         statuses = chart.notes.map { _ in .pending }
         position = firstNoteTime - 2
         speed = startSpeed
@@ -262,8 +291,73 @@ final class GameController {
         sound.allNotesOff()
         stopTimer()
         keyGlows = [:]
+        glowUntil = [:]
+        isDemoPaused = false
         phase = chart == nil ? .noChart : .ready
         position = firstNoteTime - 4
+    }
+
+    /// Stops the Watch playback where it is; `resumeDemo` goes on from there.
+    func pauseDemo() {
+        guard phase == .demo, !isDemoPaused else { return }
+        isDemoPaused = true
+        sound.allNotesOff()
+    }
+
+    func resumeDemo() {
+        guard phase == .demo, isDemoPaused else { return }
+        isDemoPaused = false
+        try? sound.start()
+        lastFrame = MonotonicClock.now()
+    }
+
+    func toggleDemoPause() {
+        if isDemoPaused { resumeDemo() } else { pauseDemo() }
+    }
+
+    // MARK: - Voice commands
+
+    /// "Play": starts the game, resumes it (or the Watch playback), or plays again after the results.
+    func play() {
+        switch phase {
+        case .ready: start()
+        case .paused: resume()
+        case .demo: resumeDemo()
+        case .finished:
+            closeResults()
+            start()
+        case .noChart, .countIn, .playing: break
+        }
+    }
+
+    /// "Stop": pauses the game or the Watch playback where it is.
+    func hold() {
+        switch phase {
+        case .countIn, .playing: pause()
+        case .demo: pauseDemo()
+        case .noChart, .ready, .paused, .finished: break
+        }
+    }
+
+    /// The speed now: the game's while one runs, otherwise the starting speed (also the Watch speed).
+    var currentSpeed: Double {
+        engine != nil && (phase == .playing || phase == .paused || isCountingIn) ? speed : startSpeed
+    }
+
+    /// "Slower" / "faster": steps the speed by `step` (e.g. -0.1).
+    func changeSpeed(by step: Double) {
+        setSpeed(((currentSpeed + step) * 20).rounded() / 20)
+    }
+
+    /// "Again": the Watch playback or the game from the beginning.
+    func startOver() {
+        if phase == .demo {
+            stopDemo()
+            playDemo()
+        } else if chart != nil {
+            if phase == .finished { closeResults() }
+            start()
+        }
     }
 
     // MARK: - Input
@@ -288,14 +382,14 @@ final class GameController {
     }
 
     private func attachInput() {
-        coach.noteObserver = { [weak self] onset, clock in self?.heard(onset, at: clock) }
-        coach.keyObserver = { [weak self] key, down in self?.key(key, down: down) }
-        if listensForNotes && !coach.isListening { coach.startListening() }
+        input.noteObserver = { [weak self] onset, clock in self?.heard(onset, at: clock) }
+        input.keyObserver = { [weak self] key, down in self?.key(key, down: down) }
+        if listensForNotes && !input.isListening { input.startListening() }
     }
 
     private func detachInput() {
-        coach.noteObserver = nil
-        coach.keyObserver = nil
+        input.noteObserver = nil
+        input.keyObserver = nil
         keysDown = []
     }
 
@@ -412,14 +506,14 @@ final class GameController {
             if note.time > position + 0.05 { break }
             if !accompanied.contains(note.id) && note.time <= position {
                 accompanied.insert(note.id)
-                if position - note.time < 0.5 { sound.noteOn(note.midi, velocity: 0.5) }
+                if position - note.time < 0.5 { sound.noteOn(note.midi, velocity: Float(note.velocity ?? 0.6) * 0.8) }
             }
             if accompanied.contains(note.id) && note.end <= position { sound.noteOff(note.midi) }
         }
     }
 
     private func demoFrame(now: Double) {
-        guard let chart else { return }
+        guard let chart, !isDemoPaused else { return }
         let dt = max(0, min(0.25, now - lastFrame))
         position += dt / chart.secondsPerBeat(atSpeed: speed)
         progress = max(0, min(1, position / max(0.001, chart.endBeat)))
@@ -427,7 +521,7 @@ final class GameController {
             if note.time > position { break }
             if !demoStarted.contains(note.id) {
                 demoStarted.insert(note.id)
-                sound.noteOn(note.midi, velocity: note.hand == .right ? 0.75 : 0.55)
+                sound.noteOn(note.midi, velocity: Float(note.velocity ?? (note.hand == .right ? 0.75 : 0.55)))
                 glow(note.midi, .pressed, for: min(0.6, note.duration * chart.secondsPerBeat(atSpeed: speed)))
             }
             if !demoEnded.contains(note.id) && note.end <= position {

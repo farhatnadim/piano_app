@@ -54,28 +54,15 @@ struct SettingsView: View {
             } header: {
                 Text("Hearing the piano")
             } footer: {
-                Text("A MIDI keyboard (USB or Bluetooth) is the most accurate: the coach knows exactly which keys are pressed. The microphone works with any piano. Raise the sensitivity if soft playing is missed; lower it if the coach reacts to talking or noise.")
+                Text("A MIDI keyboard (USB or Bluetooth) is the most accurate: the game knows exactly which keys are pressed. The microphone works with any piano. Raise the sensitivity if soft playing is missed; lower it if the game reacts to talking or noise.")
             }
 
             Section {
-                SettingSlider(title: "Pause after quiet", value: binding(\.silenceTimeout), range: 1...6, step: 0.5,
-                              valueText: String(format: "%.1f s", settings.silenceTimeout))
-                SettingSlider(title: "Video may get ahead by", value: binding(\.maxLead), range: 0.3...3, step: 0.1,
-                              valueText: String(format: "%.1f s", settings.maxLead))
-                Toggle("Let the video go faster than normal", isOn: binding(\.allowFasterThanNormal))
-            } header: {
-                Text("Waiting and following")
-            } footer: {
-                Text("How long the coach waits in silence before pausing the video, and how far the video may run ahead of your child before it waits for them.")
-            }
-
-            Section {
-                Toggle("Mute the video while listening", isOn: binding(\.muteVideoWhileListening))
-                Toggle("Echo cancellation (experimental)", isOn: binding(\.echoCancellation))
+                Toggle("Echo cancellation", isOn: binding(\.echoCancellation))
             } header: {
                 Text("Microphone")
             } footer: {
-                Text("With the video's sound on, the microphone also hears the piano in the video and may think your child is playing. Headphones avoid this. Echo cancellation tries to remove the video's sound but can also make piano notes harder to hear.")
+                Text("Removes the app's own piano from what the microphone hears, so the game only hears your child — useful when the app plays along. It can make the piano sound a little quieter.")
             }
 
             Section {
@@ -90,25 +77,13 @@ struct SettingsView: View {
             } header: {
                 Text("Voice commands")
             } footer: {
-                Text("Your child can say “slower”, “again” or “measure twelve”. While the video's sound is playing, start with “Coach” (“Coach, pause”) so the teacher in the video can't give commands. With “Only after Coach” on, the app always waits for “Coach” — useful if it reacts to normal talking.")
-            }
-
-            Section("Sheet music") {
-                Picker("Show the music", selection: binding(\.sheetLayout)) {
-                    ForEach(SheetLayout.allCases) { layout in
-                        Text(layout.displayName).tag(layout)
-                    }
-                }
+                Text("Your child can say “play”, “stop”, “slower” or “faster”. With “Only after Coach” on, the app waits for “Coach” first (“Coach, slower”) — useful if it reacts to normal talking.")
             }
 
             Section {
-                SettingSlider(title: "Speaker delay when learning", value: binding(\.learnLatency), range: 0...0.3,
-                              step: 0.01, valueText: "\(Int((settings.learnLatency * 1000).rounded())) ms")
-                Button("Reset coach settings", role: .destructive) { confirmReset = true }
-            } header: {
-                Text("Advanced")
+                Button("Reset listening settings", role: .destructive) { confirmReset = true }
             } footer: {
-                Text("The speaker delay is the time between the video playing a note and the microphone hearing it. Only change it if “Follow me” is consistently early or late after the coach learned a song.")
+                Text("Piano sound: Fluid R3 grand piano by Frank Wen (CC BY 3.0). Notes are written down with Spotify's Basic Pitch (Apache 2.0).")
             }
         }
         .formStyle(.grouped)
@@ -117,17 +92,17 @@ struct SettingsView: View {
             BluetoothMIDIPairingView()
         }
         #endif
-        .confirmationDialog("Reset the coach settings?", isPresented: $confirmReset, titleVisibility: .visible) {
+        .confirmationDialog("Reset the listening settings?", isPresented: $confirmReset, titleVisibility: .visible) {
             Button("Reset", role: .destructive) {
-                model.settings.resetCoachDefaults()
+                model.settings.resetListeningDefaults()
                 model.applySettings()
             }
         } message: {
-            Text("Sensitivity, waiting, microphone and learning settings go back to their defaults.")
+            Text("Sensitivity and echo cancellation go back to their defaults.")
         }
     }
 
-    /// A binding to a setting that pushes every change to the coach.
+    /// A binding to a setting that pushes every change to the note input and voice commands.
     private func binding<Value>(_ keyPath: ReferenceWritableKeyPath<AppSettings, Value>) -> Binding<Value> {
         let appModel = model
         let settings = appModel.settings

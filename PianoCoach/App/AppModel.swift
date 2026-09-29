@@ -5,26 +5,12 @@ import PianoCoachCore
 import UIKit
 #endif
 
-/// Sheet music ready to display for the open piece.
-enum SheetContent: Equatable {
-    /// MusicXML text rendered with OpenSheetMusicDisplay (with a moving cursor).
-    case musicXML(String)
-    case pdf(URL)
-    case image(URL)
-}
-
-/// The two ways to practise a piece.
-enum PracticeTab: String, CaseIterable, Identifiable {
-    /// The falling-notes game.
-    case game
-    /// The YouTube video, paced by the coach.
-    case video
-
-    var id: String { rawValue }
-    var displayName: String { self == .game ? "Game" : "Video" }
-}
-
-/// App-wide state: the library of pieces, the open piece, and the shared audio/video/coach objects.
+/// App-wide state: the library of songs, the open song, and the shared audio, video, game and learning
+/// objects.
+///
+/// A song starts as a YouTube link. The app listens to the video once (`SongLearner`) and writes down its
+/// notes; from then on the game plays its own rendition of the song with the built-in piano, so it can go
+/// as slowly or as quickly as the child needs without losing any sound quality.
 @MainActor
 @Observable
 final class AppModel {
@@ -37,47 +23,48 @@ final class AppModel {
     // MARK: Shared services
 
     let settings: AppSettings
-    let audio: AudioInputHub
+    let audio: AudioHub
     let midi: MIDIInputManager
     let player: YouTubePlayerController
-    let coach: CoachEngine
+    let input: NoteInput
     let voice: VoiceCommandListener
     let sound: GameSoundPlayer
     let game: GameController
+    let learner: SongLearner
 
     // MARK: Open piece
 
     private(set) var openPieceID: UUID?
-    private(set) var sheetContent: SheetContent?
-    private(set) var sheetError: String?
-    /// Whether the sheet-music panel is visible.
-    var showSheet = false
+    /// Shows the "learn this song" screen even though the song already has notes ("Learn it again").
+    private(set) var isRelearning = false
+    /// Why the open song's notes couldn't be read, if they couldn't.
+    private(set) var notesError: String?
     /// Presents the list of voice commands.
     var showVoiceHelp = false
-    /// A short confirmation shown after a voice command ("Slower").
+    /// A short confirmation shown after a voice command ("Slower · 60 %").
     private(set) var toast: String?
     @ObservationIgnored private var toastTask: Task<Void, Never>?
-    /// Measures of the open piece's score (for sync setup), if it has notes.
-    private(set) var openScore: Score?
-    /// Game or video.
-    var practiceTab: PracticeTab = .game {
-        didSet { if oldValue != practiceTab { practiceTabChanged() } }
-    }
+    /// Off in the screenshot demo, whose songs have made-up video IDs.
+    @ObservationIgnored private var loadsVideos = true
 
     var openPiece: Piece? {
         guard let id = openPieceID else { return nil }
         return pieces.first { $0.id == id }
     }
 
+    /// Whether the open song needs its notes learned (the learn screen shows instead of the game).
+    var needsLearning: Bool { game.fullChart == nil || isRelearning }
+
     init() {
         settings = AppSettings()
-        audio = AudioInputHub()
+        audio = AudioHub()
         midi = MIDIInputManager()
         player = YouTubePlayerController()
-        coach = CoachEngine(player: player, audio: audio, midi: midi)
+        input = NoteInput(audio: audio, midi: midi)
         voice = VoiceCommandListener(audio: audio)
-        sound = GameSoundPlayer()
-        game = GameController(coach: coach, sound: sound)
+        sound = GameSoundPlayer(hub: audio)
+        game = GameController(input: input, sound: sound)
+        learner = SongLearner(player: player, audio: audio)
 
         let fm = FileManager.default
         let base = (try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
@@ -90,14 +77,13 @@ final class AppModel {
         }
         pieces = sortedPieces(store?.loadPieces() ?? [])
 
-        coach.onTrackLearned = { [weak self] track in self?.saveLearnedTrack(track) }
         game.onFinished = { [weak self] result in self?.recordGame(result) }
         voice.onCommand = { [weak self] command in self?.handle(command) }
-        // While the video is audible, the microphone also hears the video (a teacher saying "stop",
-        // "again"…), so plain commands are only trusted when the video is quiet.
-        voice.requireWakeWordWhen = { [weak self] in
-            guard let player = self?.player else { return false }
-            return player.isPlaying && !player.isMuted
+        // While the app listens to a video, the microphone may hear words in it ("stop", "again"…), so
+        // plain commands are only trusted when nothing is being learned.
+        voice.requireWakeWordWhen = { [weak self] in self?.learner.isListening ?? false }
+        learner.onLearned = { [weak self] song, origin, pieceID in
+            self?.saveLearnedSong(song, origin: origin, pieceID: pieceID)
         }
         applySettings()
         #if DEBUG
@@ -117,22 +103,18 @@ final class AppModel {
         }
     }
 
-    /// Pushes the current settings into the coach, voice listener and sheet.
+    /// Pushes the current settings into the note input and the voice listener.
     func applySettings() {
-        coach.noteSource = settings.noteSource
-        coach.sensitivity = Float(settings.sensitivity)
-        coach.muteVideoWhileListening = settings.muteVideoWhileListening
-        coach.echoCancellation = settings.echoCancellation
-        coach.learnLatency = settings.learnLatency
-        coach.configure(silenceTimeout: settings.silenceTimeout, pauseLead: settings.maxLead,
-                        allowFasterThanNormal: settings.allowFasterThanNormal)
+        input.noteSource = settings.noteSource
+        input.sensitivity = Float(settings.sensitivity)
+        input.echoCancellation = settings.echoCancellation
         voice.requireWakeWord = settings.requireWakeWord
         if openPieceID != nil {
             if settings.voiceCommandsEnabled && !voice.isRunning {
                 Task { await voice.start() }
             } else if !settings.voiceCommandsEnabled && voice.isRunning {
                 voice.stop()
-                stopAudioIfIdle()
+                stopMicrophoneIfIdle()
             }
         }
     }
@@ -144,7 +126,7 @@ final class AppModel {
     func addPiece(link: String, title: String) async -> Piece? {
         guard let videoID = YouTubeLink.videoID(from: link) else { return nil }
         var name = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if name.isEmpty { name = await Self.fetchTitle(videoID: videoID) ?? "New piece" }
+        if name.isEmpty { name = await Self.fetchTitle(videoID: videoID) ?? "New song" }
         let piece = Piece(title: name, videoID: videoID, resumeTime: YouTubeLink.startTime(from: link) ?? 0)
         pieces.insert(piece, at: 0)
         persist()
@@ -190,131 +172,49 @@ final class AppModel {
         if openPieceID == piece.id { return }
         if openPieceID != nil { closePiece() }
         openPieceID = piece.id
-        loadSheetAndScore(for: piece)
-        showSheet = sheetContent != nil
-        let learned = piece.hasLearnedTrack ? store?.loadTrack(forPiece: piece.id) : nil
-        coach.attach(score: openScore, syncMap: piece.syncMap, learned: learned, manualRate: piece.manualRate)
-        coach.loop = piece.loop
-        player.load(videoID: piece.videoID, startTime: piece.resumeTime, muted: false)
-        loadGame(for: piece, learned: learned)
+        isRelearning = false
+        loadNotes(for: piece)
+        // The video is only needed to learn the song.
+        if game.fullChart == nil && loadsVideos { player.load(videoID: piece.videoID, startTime: 0, muted: false) }
         applySettings()
-        if var p = openPiece {            // re-read: loadGame may have stored the difficulty
+        if var p = openPiece {            // re-read: loadNotes may have stored the difficulty
             p.lastPracticedAt = Date()
             update(p)
         }
-        if practiceTab == .video { practiceTabChanged() } else { practiceTab = game.chart == nil ? .video : .game }
     }
 
     func closePiece() {
-        guard var piece = openPiece else { return }
+        guard openPieceID != nil else { return }
         game.stop()
-        coach.cancelLearning()
-        coach.setMode(.off)
-        coach.stopListening()
+        learner.cancel()
+        input.stopListening()
         player.pause()
         voice.stop()
-        stopAudioIfIdle()
-        piece.resumeTime = player.currentTime
-        piece.loop = coach.loop
-        update(piece)
+        sound.stop()
+        audio.stop()
         openPieceID = nil
-        openScore = nil
-        sheetContent = nil
-        sheetError = nil
+        isRelearning = false
+        notesError = nil
     }
 
-    private func stopAudioIfIdle() {
-        if !coach.isListening && !voice.isRunning && !coach.isLearning { audio.stop() }
+    private func stopMicrophoneIfIdle() {
+        if !input.isListening && !voice.isRunning && !learner.isListening { audio.stop() }
     }
 
-    private func loadSheetAndScore(for piece: Piece) {
-        sheetContent = nil
-        sheetError = nil
-        openScore = nil
-        guard let store else { return }
-        if let sheet = piece.sheet, sheet.kind.hasNotes {
-            do {
-                openScore = try ScoreLoader.loadScore(from: try store.data(for: sheet), kind: sheet.kind)
-            } catch {
-                sheetError = "Couldn't read the notes in “\(sheet.originalName)”."
-            }
-        }
-        if let display = piece.sheetForDisplay {
-            switch display.kind {
-            case .musicXML, .compressedMusicXML:
-                if let data = try? store.data(for: display),
-                   let text = try? ScoreLoader.musicXMLText(from: data, kind: display.kind) {
-                    sheetContent = .musicXML(text)
-                } else {
-                    sheetError = "Couldn't open “\(display.originalName)”."
-                }
-            case .pdf:
-                sheetContent = .pdf(store.url(for: display))
-            case .image:
-                sheetContent = .image(store.url(for: display))
-            case .midi:
-                break
-            }
-        }
-    }
-
-    // MARK: - Sheet music & sync
-
-    /// Imports a sheet-music file for a piece. MusicXML/MIDI replace the notes; PDFs/images become the
-    /// displayed sheet (kept alongside MIDI notes).
-    func attachSheet(from url: URL, to piece: Piece) throws {
-        guard let store else { return }
-        let attachment = try store.importAttachment(from: url)
-        var p = piece
-        if attachment.kind.hasNotes {
-            // Validate before replacing anything.
-            let score = try ScoreLoader.loadScore(from: try store.data(for: attachment), kind: attachment.kind)
-            if let old = p.sheet { store.removeAttachment(old) }
-            p.sheet = attachment
-            if attachment.kind != .midi, let old = p.displaySheet {
-                store.removeAttachment(old)
-                p.displaySheet = nil
-            }
-            let bpm = p.videoBPM ?? score.initialTempoBPM ?? 90
-            if p.videoBPM == nil { p.videoBPM = bpm }
-            p.syncMap = SyncMap(bpm: bpm, offset: p.syncMap?.offset ?? 0)
-        } else {
-            if let old = p.displaySheet { store.removeAttachment(old) }
-            if let old = p.sheet, !old.kind.hasNotes { store.removeAttachment(old); p.sheet = nil }
-            if p.sheet == nil { p.sheet = attachment } else { p.displaySheet = attachment }
-        }
-        update(p)
-        if openPieceID == p.id { reloadOpenPiece(p) }
-    }
-
-    func removeSheets(from piece: Piece) {
-        var p = piece
-        if let s = p.sheet { store?.removeAttachment(s) }
-        if let s = p.displaySheet { store?.removeAttachment(s) }
-        p.sheet = nil
-        p.displaySheet = nil
-        p.syncMap = nil
-        update(p)
-        if openPieceID == p.id { reloadOpenPiece(p) }
-    }
-
-    private func reloadOpenPiece(_ piece: Piece) {
-        loadSheetAndScore(for: piece)
-        let learned = piece.hasLearnedTrack ? store?.loadTrack(forPiece: piece.id) : nil
-        coach.attach(score: openScore, syncMap: piece.syncMap, learned: learned, manualRate: piece.manualRate)
-        loadGame(for: piece, learned: learned)
-    }
-
-    // MARK: - Game
-
-    /// Builds the game's notes: exact from sheet music when there is some, otherwise worked out from
-    /// what the coach heard while listening to the video.
-    private func loadGame(for piece: Piece, learned: FollowTrack?) {
+    /// Reads the open song's notes and hands them to the game.
+    private func loadNotes(for piece: Piece) {
+        notesError = nil
         var chart: NoteChart?
-        if let score = openScore {
-            chart = NoteChart.from(score: score, title: piece.title)
-        } else if let learned {
-            chart = NoteChart.fromListening(track: learned, title: piece.title)
+        if let sheet = piece.sheet, sheet.kind.hasNotes, let store {
+            do {
+                let score = try ScoreLoader.loadScore(from: try store.data(for: sheet), kind: sheet.kind)
+                chart = NoteChart.from(score: score, title: piece.title)
+            } catch {
+                notesError = "Couldn't read the notes in “\(sheet.originalName)”."
+            }
+        } else if piece.hasLearnedTrack, let track = store?.loadTrack(forPiece: piece.id) {
+            // Notes an older version of the app worked out through the microphone.
+            chart = NoteChart.fromListening(track: track, title: piece.title)
         }
         game.load(chart: chart, progress: piece.game)
         if let chart, var p = pieces.first(where: { $0.id == piece.id }) {
@@ -326,6 +226,98 @@ final class AppModel {
         }
     }
 
+    // MARK: - Learning a song
+
+    /// Shows the learn screen for the open song, e.g. to learn it again from the video.
+    func showLearnScreen() {
+        guard let piece = openPiece else { return }
+        game.stop()
+        isRelearning = game.fullChart != nil
+        if player.videoID != piece.videoID { player.load(videoID: piece.videoID, startTime: 0, muted: false) }
+    }
+
+    /// Leaves the learn screen for the game (when the song already has notes).
+    func closeLearnScreen() {
+        learner.cancel()
+        player.pause()
+        isRelearning = false
+    }
+
+    /// Listens to the open song's video and writes down its notes.
+    func learnFromVideo() {
+        guard let piece = openPiece else { return }
+        game.stop()
+        input.stopListening()
+        learner.listenToVideo(title: piece.title, pieceID: piece.id)
+    }
+
+    /// Writes down the notes of an audio file of the open song.
+    func learnFromAudioFile(_ url: URL) {
+        guard let piece = openPiece else { return }
+        game.stop()
+        input.stopListening()
+        learner.learn(fromAudioFile: url, title: piece.title, pieceID: piece.id)
+    }
+
+    /// Saves learned notes as the song's MIDI file and opens the game.
+    private func saveLearnedSong(_ song: ArrangedSong, origin: NotesOrigin, pieceID: UUID) {
+        guard let store, var piece = pieces.first(where: { $0.id == pieceID }) else { return }
+        do {
+            let data = MIDIFileWriter.data(for: song.score)
+            let attachment = try store.importAttachment(data: data, fileExtension: "mid",
+                                                        originalName: "\(piece.title).mid")
+            if let old = piece.sheet { store.removeAttachment(old) }
+            piece.sheet = attachment
+            piece.songInfo = SongInfo(origin: origin, keyName: song.keyName, tempoBPM: song.tempoBPM,
+                                      noteCount: song.score.notes.count)
+            update(piece)
+        } catch {
+            libraryError = "Couldn't save the song's notes: \(error.localizedDescription)"
+            return
+        }
+        guard openPieceID == pieceID else { return }
+        player.pause()
+        isRelearning = false
+        loadNotes(for: piece)
+        showToast("Your song is ready!")
+    }
+
+    /// Uses a MIDI or MusicXML file as the open song's notes.
+    func importNotes(from url: URL) throws {
+        guard let store, var piece = openPiece else { return }
+        let attachment = try store.importAttachment(from: url)
+        let score: Score
+        do {
+            guard attachment.kind.hasNotes else { throw ImportError.noNotes }
+            score = try ScoreLoader.loadScore(from: try store.data(for: attachment), kind: attachment.kind)
+        } catch {
+            store.removeAttachment(attachment)
+            throw error
+        }
+        if let old = piece.sheet { store.removeAttachment(old) }
+        piece.sheet = attachment
+        piece.songInfo = SongInfo(origin: .sheetMusic, tempoBPM: score.initialTempoBPM, noteCount: score.notes.count)
+        update(piece)
+        learner.cancel()
+        player.pause()
+        isRelearning = false
+        loadNotes(for: piece)
+    }
+
+    enum ImportError: LocalizedError {
+        case noNotes
+
+        var errorDescription: String? { "That file has no notes. Choose a MIDI or MusicXML file." }
+    }
+
+    /// The open song's notes as a file, for sharing (a MIDI file for learned songs).
+    var notesFileURL: URL? {
+        guard let store, let sheet = openPiece?.sheet, sheet.kind.hasNotes else { return nil }
+        return store.url(for: sheet)
+    }
+
+    // MARK: - Game
+
     /// Saves a finished game into the piece's progress and returns the level change to celebrate.
     private func recordGame(_ result: GameResult) -> LevelChange? {
         guard var piece = openPiece else { return nil }
@@ -336,176 +328,78 @@ final class AppModel {
         return change
     }
 
-    /// Makes the game build its notes by listening to the video (the coach's learning pass).
-    func buildGameByListening() {
-        practiceTab = .video
-        coach.startLearning()
-    }
-
-    private func practiceTabChanged() {
-        switch practiceTab {
-        case .game:
-            coach.cancelLearning()
-            coach.setMode(.off)
-            player.pause()
-        case .video:
-            game.stop()
-        }
-    }
-
-    /// Sets the video's tempo (quarter notes per minute) and keeps the sync's start point.
-    func setTempo(_ bpm: Double, for piece: Piece) {
-        guard bpm > 10, bpm < 400 else { return }
-        var p = piece
-        p.videoBPM = bpm
-        if var sync = p.syncMap {
-            sync.bpm = bpm
-            p.syncMap = sync
-        } else if openScore != nil || p.sheet?.kind.hasNotes == true {
-            p.syncMap = SyncMap(bpm: bpm, offset: 0)
-        }
-        update(p)
-        if openPieceID == p.id { coach.updateSync(p.syncMap) }
-    }
-
-    /// "The first note of the music is here": aligns the score's first note with `videoTime`.
-    func setSyncStart(videoTime: Double, for piece: Piece) {
-        guard let score = openScore, let first = score.events.first else { return }
-        var p = piece
-        let bpm = p.syncMap?.bpm ?? p.videoBPM ?? score.initialTempoBPM ?? 90
-        p.syncMap = SyncMap(bpm: bpm, offset: videoTime - first.beat * 60 / bpm)
-        update(p)
-        if openPieceID == p.id { coach.updateSync(p.syncMap) }
-    }
-
-    /// Nudges the whole sync earlier/later by `seconds`.
-    func nudgeSync(by seconds: Double, for piece: Piece) {
-        guard var sync = piece.syncMap else { return }
-        var p = piece
-        if sync.anchors.isEmpty {
-            sync.offset += seconds
-        } else {
-            let shifted = sync.anchors.map { SyncAnchor(videoTime: $0.videoTime + seconds, beat: $0.beat) }
-            sync = SyncMap(bpm: sync.bpm, offset: sync.offset + seconds, anchors: shifted)
-        }
-        p.syncMap = sync
-        update(p)
-        if openPieceID == p.id { coach.updateSync(p.syncMap) }
-    }
-
-    /// Replaces the sync with anchors tapped along with the video (one tap per measure, starting at measure 1).
-    func applyTappedSync(measureTapTimes: [Double], for piece: Piece) {
-        guard let score = openScore, measureTapTimes.count >= 2 else { return }
-        let fullMeasures = score.measures.filter { $0.lengthBeats + 1e-6 >= $0.timeSignature.quarterBeatsPerMeasure }
-        let anchors = zip(measureTapTimes, fullMeasures).map { SyncAnchor(videoTime: $0.0, beat: $0.1.startBeat) }
-        guard let first = anchors.first, let last = anchors.last, last.videoTime > first.videoTime else { return }
-        let bpm = (last.beat - first.beat) / (last.videoTime - first.videoTime) * 60
-        var p = piece
-        p.videoBPM = bpm
-        p.syncMap = SyncMap(bpm: bpm, offset: first.videoTime - first.beat * 60 / bpm, anchors: anchors)
-        update(p)
-        if openPieceID == p.id { coach.updateSync(p.syncMap) }
-    }
-
-    // MARK: - Learned tracks
-
-    private func saveLearnedTrack(_ track: FollowTrack) {
-        guard var piece = openPiece else { return }
-        do {
-            try store?.saveTrack(track, forPiece: piece.id)
-            piece.hasLearnedTrack = true
-            update(piece)
-            if openScore == nil { loadGame(for: piece, learned: track) }
-        } catch {
-            libraryError = "Couldn't save what the coach learned: \(error.localizedDescription)"
-        }
-    }
-
-    func forgetLearnedTrack(for piece: Piece) {
-        store?.removeTrack(forPiece: piece.id)
-        var p = piece
-        p.hasLearnedTrack = false
-        update(p)
-        if openPieceID == p.id {
-            coach.forgetLearnedTrack()
-            if openScore == nil { game.load(chart: nil, progress: p.game) }
-        }
-    }
-
-    // MARK: - Practice preferences
-
-    func setPreferredMode(_ mode: CoachMode) {
-        coach.setMode(mode)
-        if var p = openPiece {
-            p.preferredMode = coach.mode
-            update(p)
-        }
-    }
-
-    func setSpeed(_ rate: Double) {
-        coach.setSpeed(rate)
-        if var p = openPiece, coach.mode != .followMe {
-            p.manualRate = coach.speedSetting
-            update(p)
-        }
-    }
-
-    func stepSpeed(by steps: Int) {
-        coach.stepSpeed(by: steps)
-        if var p = openPiece, coach.mode != .followMe {
-            p.manualRate = coach.speedSetting
-            update(p)
-        }
-    }
-
     // MARK: - Voice commands
 
     func handle(_ command: VoiceCommand) {
         guard openPieceID != nil else { return }
-        switch command {
-        case .play: coach.userPlay()
-        case .pause: coach.userPause()
-        case .slower: stepSpeed(by: -1)
-        case .faster: stepSpeed(by: 1)
-        case .normalSpeed: setSpeed(1)
-        case .setSpeed(let r): setSpeed(r)
-        case .showMusic: showSheet = true
-        case .hideMusic: showSheet = false
-        case .followMe: setPreferredMode(.followMe)
-        case .waitForMe: setPreferredMode(.waitForMe)
-        case .coachOff: setPreferredMode(.off)
-        case .goBack: coach.goBack()
-        case .goForward: coach.skip(by: 5)
-        case .again: coach.again()
-        case .restart: coach.restartPiece()
-        case .goToMeasure(let n):
-            if !coach.goToMeasure(n) {
-                showToast("I need sheet music with notes to find measure \(n)")
-                return
-            }
-        case .loopThis: coach.loopHere()
-        case .stopLoop: coach.loop = nil
-        case .soundOn: coach.setSound(on: true)
-        case .soundOff: coach.setSound(on: false)
-        case .help: showVoiceHelp = true
+        if case .help = command {
+            showVoiceHelp = true
+            showToast(command.confirmation)
+            return
         }
-        showToast(command.confirmation)
+        guard !needsLearning else { return }
+        var confirmation = command.confirmation
+        switch command {
+        case .play: game.play()
+        case .pause: game.hold()
+        case .slower:
+            game.changeSpeed(by: -0.1)
+            confirmation += " · \(Int((game.currentSpeed * 100).rounded())) %"
+        case .faster:
+            game.changeSpeed(by: 0.1)
+            confirmation += " · \(Int((game.currentSpeed * 100).rounded())) %"
+        case .normalSpeed: game.setSpeed(1)
+        case .setSpeed(let rate): game.setSpeed(rate)
+        case .listen:
+            if game.phase == .demo { game.resumeDemo() } else { game.playDemo() }
+        case .showNotes: game.display = .notes
+        case .showKeys: game.display = .keys
+        case .hands(let hands):
+            if game.phase != .ready && game.phase != .demo { game.stop() }
+            game.hands = hands
+        case .again: game.startOver()
+        case .soundOn: sound.isMuted = false
+        case .soundOff: sound.isMuted = true
+        case .help: break
+        }
+        showToast(confirmation)
+    }
+
+    func showToast(_ text: String) {
+        toast = text
+        toastTask?.cancel()
+        toastTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.toast = nil
+        }
     }
 
     #if DEBUG
-    /// Screenshot mode used by CI: `-screenshot-demo keys|notes|start [landscape]` opens the built-in demo
-    /// song in the game (without voice commands, so no permission prompts cover the screen).
+    /// Screenshot mode used by CI: `-screenshot-demo keys|notes|start|learn [landscape]` opens a built-in
+    /// song (without voice commands, so no permission prompts cover the screen).
     private func startScreenshotDemoIfRequested() {
         let arguments = ProcessInfo.processInfo.arguments
         guard let flag = arguments.firstIndex(of: "-screenshot-demo") else { return }
         let scene = arguments.dropFirst(flag + 1).joined(separator: " ")
         settings.voiceCommandsEnabled = false
+        loadsVideos = false
+        if scene.contains("learn") {
+            let piece = Piece(title: "Clair de Lune", videoID: "ClairDeLune")
+            pieces.insert(piece, at: 0)
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                self?.openPiece(piece)
+            }
+            return
+        }
         let piece: Piece
         if let existing = pieces.first(where: { $0.title == DemoSong.title }) {
             piece = existing
         } else {
             var demo = Piece(title: DemoSong.title, videoID: "Ode2JoyDemo")
             demo.difficulty = ChartDifficulty.estimate(DemoSong.chart).level
+            demo.songInfo = SongInfo(origin: .video, keyName: "C major", tempoBPM: 100, noteCount: DemoSong.chart.notes.count)
             // A few games already played, so the library shows a level and stars.
             var progress = GameProgress(speed: 0.7)
             progress.gamesPlayed = 3
@@ -528,7 +422,6 @@ final class AppModel {
             #endif
             self.openPiece(piece)
             self.game.load(chart: DemoSong.chart, progress: piece.game)
-            self.practiceTab = .game
             self.game.display = scene.contains("notes") ? .notes : .keys
             guard !scene.contains("start") else { return }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -567,14 +460,4 @@ final class AppModel {
         }
     }
     #endif
-
-    func showToast(_ text: String) {
-        toast = text
-        toastTask?.cancel()
-        toastTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            guard !Task.isCancelled else { return }
-            self?.toast = nil
-        }
-    }
 }

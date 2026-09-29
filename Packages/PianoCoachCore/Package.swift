@@ -12,6 +12,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "PianoCoachCore"),
-        .testTarget(name: "PianoCoachCoreTests", dependencies: ["PianoCoachCore"]),
+        // Fixtures are read from disk by path (see TestSupport), not bundled as resources.
+        .testTarget(name: "PianoCoachCoreTests", dependencies: ["PianoCoachCore"], exclude: ["Fixtures"]),
     ]
 )

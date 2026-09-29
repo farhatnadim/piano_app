@@ -9,19 +9,15 @@ import AppKit
 struct PianoCoachApp: App {
     @State private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
-    #if os(iOS)
-    /// The coach mode to bring back when the app returns to the screen.
-    @State private var modeBeforeBackground: CoachMode?
-    #endif
 
     var body: some Scene {
         #if os(macOS)
-        // A single window: the YouTube player and the coach exist once, so a second window can't share them.
+        // A single window: the YouTube player and the audio engine exist once, so a second window can't share them.
         Window("Piano Coach", id: "main") {
             RootView()
                 .environment(model)
                 .frame(minWidth: 760, minHeight: 540)
-                // Closing the window or quitting saves where the video was and stops the microphone.
+                // Closing the window or quitting stops the sound and the microphone.
                 .onDisappear { model.closePiece() }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     model.closePiece()
@@ -49,31 +45,22 @@ struct PianoCoachApp: App {
     }
 
     #if os(iOS)
-    /// Stops the video, the coach and the microphone when the app leaves the screen, and saves where the
-    /// video was. The piece stays open.
+    /// Stops the game, the learning, the sound and the microphone when the app leaves the screen. The
+    /// song stays open.
     private func pauseForBackground() {
-        let coach = model.coach
-        coach.cancelLearning()
-        if coach.mode != .off { modeBeforeBackground = coach.mode }
-        coach.setMode(.off)
-        coach.stopListening()
+        model.game.hold()
+        model.game.stopDemo()
+        model.learner.cancel()
+        model.input.stopListening()
         model.player.pause()
         model.voice.stop()
+        model.sound.stop()
         model.audio.stop()
-        if var piece = model.openPiece {
-            piece.resumeTime = model.player.currentTime
-            piece.loop = coach.loop
-            model.update(piece)
-        }
     }
 
-    /// Restarts voice commands and the coach (paused; it waits for the child as usual).
+    /// Restarts voice commands (the game stays paused until the child carries on).
     private func resumeFromBackground() {
         model.applySettings()
-        if let mode = modeBeforeBackground, model.openPiece != nil {
-            model.coach.setMode(mode)
-        }
-        modeBeforeBackground = nil
     }
     #endif
 }

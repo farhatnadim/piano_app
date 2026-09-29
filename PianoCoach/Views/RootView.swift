@@ -24,7 +24,7 @@ struct RootView: View {
         .onChange(of: model.openPieceID) { _, id in
             compactColumn = id == nil ? .sidebar : .detail
             #if os(iOS)
-            // Give the video and the music the whole iPad screen; the sidebar button brings the list back.
+            // Give the game the whole iPad screen; the sidebar button brings the list back.
             columnVisibility = id == nil ? .all : .detailOnly
             #endif
         }
@@ -53,8 +53,8 @@ struct RootView: View {
         return ContentUnavailableView {
             Label(hasSongs ? "Choose a song" : "Add a YouTube link to get started", systemImage: "pianokeys")
         } description: {
-            Text(hasSongs ? "Pick a song from the library to play the game or watch the video."
-                          : "Add the video of a song your child is learning.")
+            Text(hasSongs ? "Pick a song from the library to play it on the piano."
+                          : "Add the video of a song your child is learning. Piano Coach listens to it once and turns it into a game.")
         } actions: {
             if hasSongs && columnVisibility == .detailOnly {
                 Button { columnVisibility = .all } label: {
