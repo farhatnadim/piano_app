@@ -76,6 +76,34 @@ public struct ScoreEvent: Codable, Hashable, Sendable {
     }
 }
 
+/// Which hand plays a note.
+public enum Hand: String, Codable, CaseIterable, Sendable {
+    case left
+    case right
+
+    public var displayName: String { self == .left ? "Left hand" : "Right hand" }
+}
+
+/// One note of a score with its own length and hand (what a falling-notes game draws).
+public struct ScoreNote: Codable, Hashable, Sendable {
+    public var midi: Int
+    /// Onset in quarter-note beats from the start of the performance (repeats unrolled).
+    public var beat: Double
+    /// Sounding length in quarter-note beats, tied notes included.
+    public var durationBeats: Double
+    public var hand: Hand
+    /// Performance-order measure index.
+    public var measureIndex: Int
+
+    public init(midi: Int, beat: Double, durationBeats: Double, hand: Hand, measureIndex: Int) {
+        self.midi = midi
+        self.beat = beat
+        self.durationBeats = durationBeats
+        self.hand = hand
+        self.measureIndex = measureIndex
+    }
+}
+
 /// A parsed piece of music reduced to what the coach needs: measures and a timeline of note onsets.
 public struct Score: Codable, Hashable, Sendable {
     public var title: String?
@@ -86,13 +114,20 @@ public struct Score: Codable, Hashable, Sendable {
     public var events: [ScoreEvent]
     /// Initial tempo in quarter notes per minute, if the file specifies one.
     public var initialTempoBPM: Double?
+    /// Every note with its length and hand, sorted by beat then pitch (tied continuations merged).
+    public var notes: [ScoreNote]
+    /// Key signature as a count of sharps (positive) or flats (negative), for spelling note names.
+    public var keyFifths: Int
 
-    public init(title: String? = nil, composer: String? = nil, measures: [ScoreMeasure], events: [ScoreEvent], initialTempoBPM: Double? = nil) {
+    public init(title: String? = nil, composer: String? = nil, measures: [ScoreMeasure], events: [ScoreEvent],
+                initialTempoBPM: Double? = nil, notes: [ScoreNote] = [], keyFifths: Int = 0) {
         self.title = title
         self.composer = composer
         self.measures = measures
         self.events = events
         self.initialTempoBPM = initialTempoBPM
+        self.notes = notes
+        self.keyFifths = keyFifths
     }
 
     /// Total length in quarter-note beats.

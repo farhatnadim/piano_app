@@ -53,11 +53,15 @@ public enum MIDIFileParser {
             p = end
         }
 
-        var notes: [(tick: Int, midi: Int, duration: Int)] = []
+        var notes: [(tick: Int, midi: Int, duration: Int, track: Int)] = []
         var tempos: [(tick: Int, microseconds: Int)] = []
         var signatures: [(tick: Int, signature: TimeSignature)] = []
+        var noteTracks = 0
         for t in tracks {
-            notes.append(contentsOf: t.notes)
+            if !t.notes.isEmpty {
+                notes.append(contentsOf: t.notes.map { ($0.tick, $0.midi, $0.duration, noteTracks) })
+                noteTracks += 1
+            }
             tempos.append(contentsOf: t.tempos)
             signatures.append(contentsOf: t.timeSignatures)
         }
@@ -104,8 +108,20 @@ public enum MIDIFileParser {
             events[k].durationBeats = k + 1 < events.count ? events[k + 1].beat - events[k].beat : lastDuration
         }
 
+        // Hands: piano files usually put the right hand on the first note track and the left on the second;
+        // otherwise split at middle C.
+        var cursor = 0
+        let scoreNotes = notes.map { n -> ScoreNote in
+            let beat = Double(n.tick) / Double(ppq)
+            while cursor + 1 < measures.count, measures[cursor + 1].startBeat <= beat + 1e-9 { cursor += 1 }
+            let hand: Hand = noteTracks == 2 ? (n.track == 0 ? .right : .left) : (n.midi >= 60 ? .right : .left)
+            return ScoreNote(midi: n.midi, beat: beat, durationBeats: Double(n.duration) / Double(ppq),
+                             hand: hand, measureIndex: measures[cursor].index)
+        }
+
         let tempo = tempos.first.flatMap { $0.microseconds > 0 ? 60_000_000 / Double($0.microseconds) : nil }
-        return Score(title: tracks.first?.name, composer: nil, measures: measures, events: events, initialTempoBPM: tempo)
+        return Score(title: tracks.first?.name, composer: nil, measures: measures, events: events, initialTempoBPM: tempo,
+                     notes: scoreNotes)
     }
 
     // MARK: - Measures

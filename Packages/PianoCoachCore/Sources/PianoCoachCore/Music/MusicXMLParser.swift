@@ -53,6 +53,12 @@ public enum MusicXMLParser {
         var onset: Double
         var duration: Double
         var midi: Int
+        /// 1-based staff within its part.
+        var staff: Int = 1
+        /// 0-based part index.
+        var part: Int = 0
+        /// A tied continuation: extends an earlier note rather than striking a new one.
+        var isContinuation = false
     }
 
     /// Everything gathered about one `<measure>` ordinal across all parts.
@@ -88,8 +94,9 @@ public enum MusicXMLParser {
         }
 
         var source: [SourceMeasure] = []
-        for part in root.children(named: "part") {
-            var reader = PartReader()
+        var stavesPerPart: [Int] = []
+        for (partIndex, part) in root.children(named: "part").enumerated() {
+            var reader = PartReader(part: partIndex)
             for (ordinal, measureNode) in part.children(named: "measure").enumerated() {
                 if ordinal == source.count {
                     let label = measureNode.attribute("number")?.trimmingCharacters(in: .whitespaces) ?? ""
@@ -97,6 +104,7 @@ public enum MusicXMLParser {
                 }
                 reader.read(measureNode, into: &source[ordinal])
             }
+            stavesPerPart.append(reader.maxStaff)
         }
         guard !source.isEmpty else { throw MusicXMLError.noNotes }
 
@@ -115,21 +123,45 @@ public enum MusicXMLParser {
         var measures: [ScoreMeasure] = []
         measures.reserveCapacity(order.count)
         var attacks: [(beat: Double, measure: Int, note: NoteRecord)] = []
+        var notes: [ScoreNote] = []
+        // Latest note per (part, staff, pitch), for extending it with tied continuations.
+        var openNotes: [Int: Int] = [:]
+        let pitchedParts = Set(source.flatMap { $0.notes.map(\.part) })
+        func hand(_ n: NoteRecord) -> Hand {
+            if n.part < stavesPerPart.count, stavesPerPart[n.part] >= 2 { return n.staff == 1 ? .right : .left }
+            if pitchedParts.count == 2, let first = pitchedParts.min() { return n.part == first ? .right : .left }
+            return n.midi >= 60 ? .right : .left
+        }
         var start = 0.0
         for (index, s) in order.enumerated() {
             measures.append(ScoreMeasure(index: index, sourceIndex: s, number: source[s].number, startBeat: start,
                                          lengthBeats: lengths[s], timeSignature: signatures[s]))
             for note in source[s].notes {
-                attacks.append((start + note.onset, index, note))
+                let beat = start + note.onset
+                let key = (note.part * 16 + note.staff) * 128 + note.midi
+                if note.isContinuation {
+                    if let i = openNotes[key], abs(notes[i].beat + notes[i].durationBeats - beat) < 1e-3 {
+                        notes[i].durationBeats += note.duration
+                    }
+                    continue
+                }
+                attacks.append((beat, index, note))
+                openNotes[key] = notes.count
+                notes.append(ScoreNote(midi: note.midi, beat: beat, durationBeats: note.duration,
+                                       hand: hand(note), measureIndex: index))
             }
             start += lengths[s]
         }
+        notes = notes.enumerated().sorted {
+            ($0.element.beat, $0.element.midi, $0.offset) < ($1.element.beat, $1.element.midi, $1.offset)
+        }.map(\.element)
 
         let events = groupAttacks(attacks, measures: measures)
         guard !events.isEmpty else { throw MusicXMLError.noNotes }
 
+        let fifths = root.firstDescendant { $0.name == "fifths" }.flatMap { Int($0.trimmedText) } ?? 0
         return Score(title: title(root), composer: composer(root), measures: measures, events: events,
-                     initialTempoBPM: tempo(root))
+                     initialTempoBPM: tempo(root), notes: notes, keyFifths: max(-7, min(7, fifths)))
     }
 
     /// Merges attacks at the same beat (within 1e-6) into events.
@@ -226,7 +258,10 @@ public enum MusicXMLParser {
     // MARK: - Per-part reading
 
     struct PartReader {
+        var part: Int
         var divisions: Double = 1
+        /// Highest staff number seen in this part.
+        var maxStaff = 1
 
         mutating func read(_ measure: LiteXMLElement, into m: inout SourceMeasure) {
             // Position = base + offset / divisions (rebased whenever <divisions> changes mid-measure),
@@ -260,10 +295,12 @@ public enum MusicXMLParser {
                         offset += duration
                         furthest = max(furthest, position())
                     }
+                    let staff = max(1, child.child("staff").flatMap { Int($0.trimmedText) } ?? 1)
+                    maxStaff = max(maxStaff, staff)
                     guard child.child("cue") == nil, child.child("rest") == nil,
-                          let pitch = child.child("pitch"), let midi = MusicXMLParser.midiNumber(pitch),
-                          !MusicXMLParser.isTiedContinuation(child) else { continue }
-                    m.notes.append(NoteRecord(onset: onset, duration: duration / divisions, midi: midi))
+                          let pitch = child.child("pitch"), let midi = MusicXMLParser.midiNumber(pitch) else { continue }
+                    m.notes.append(NoteRecord(onset: onset, duration: duration / divisions, midi: midi, staff: staff,
+                                              part: part, isContinuation: MusicXMLParser.isTiedContinuation(child)))
                 case "backup":
                     offset -= max(0, MusicXMLParser.duration(child))
                     if position() < 0 { offset = -base * divisions }
