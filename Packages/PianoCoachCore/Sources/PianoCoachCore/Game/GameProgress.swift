@@ -108,11 +108,13 @@ public struct ChartDifficulty: Equatable, Sendable {
         let largestChord = chart.chords.map(\.count).max() ?? 1
         let bothHands = Set(notes.map(\.hand)).count > 1
         let range = chart.highestMIDI - chart.lowestMIDI
-        var points = nps / 1.2                                   // ~1.2 notes/s is gentle
-        points += Double(max(0, largestChord - 1)) * 0.5
-        points += bothHands ? 0.8 : 0
-        points += Double(max(0, range - 12)) / 12 * 0.5
-        let level = max(1, min(5, Int(points.rounded(.up))))
+        // Calibrated so an easy one-hand melody is 1, a beginner two-hand piece (Ode to Joy with a
+        // simple bass) is 2, and fast, chordal two-hand music reaches 5.
+        var points = nps / 2
+        points += Double(max(0, largestChord - 1)) * 0.3
+        points += bothHands ? 0.4 : 0
+        points += Double(max(0, range - 12)) / 12 * 0.25
+        let level = max(1, min(5, Int(points.rounded())))
         return ChartDifficulty(level: level, notesPerSecond: nps, largestChord: largestChord,
                                usesBothHands: bothHands, range: range)
     }

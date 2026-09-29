@@ -112,10 +112,18 @@ jobs:
           shoot 1-keys -screenshot-demo keys
           shoot 2-notes -screenshot-demo notes
           shoot 3-start -screenshot-demo start
+          shoot 6-library
+          # iPad apps that support multitasking can't rotate themselves, so rotate the simulator
+          # from its Device menu (needs UI scripting on the runner; skipped if unavailable).
+          open -a Simulator --args -CurrentDeviceUDID "$UDID" || true
+          sleep 6
+          osascript -e 'tell application "Simulator" to activate' \
+            -e 'tell application "System Events" to tell process "Simulator" to click menu item "Rotate Left" of menu "Device" of menu bar 1' \
+            || echo "Could not rotate the simulator"
+          sleep 3
           shoot 4-keys-landscape -screenshot-demo keys landscape
           shoot 5-notes-landscape -screenshot-demo notes landscape
-          shoot 6-library
-          ls -la shots
+          for f in shots/*.png; do echo "$f $(sips -g pixelWidth -g pixelHeight "$f" | awk '/pixel/ {printf "%s ", $2}')"; done
       - uses: actions/upload-artifact@v4
         with:
           name: ipad-screenshots

@@ -4,7 +4,8 @@ import SwiftUI
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @State private var compactColumn = NavigationSplitViewColumn.sidebar
-    @State private var columnVisibility = NavigationSplitViewVisibility.automatic
+    /// The library shows next to the empty screen at launch (also in iPad portrait, where `.automatic` hides it).
+    @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var showAddPiece = false
 
     var body: some View {
@@ -24,7 +25,7 @@ struct RootView: View {
             compactColumn = id == nil ? .sidebar : .detail
             #if os(iOS)
             // Give the video and the music the whole iPad screen; the sidebar button brings the list back.
-            columnVisibility = id == nil ? .automatic : .detailOnly
+            columnVisibility = id == nil ? .all : .detailOnly
             #endif
         }
         .sheet(isPresented: $model.showVoiceHelp) {
@@ -48,11 +49,20 @@ struct RootView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label("Add a YouTube link to get started", systemImage: "pianokeys")
+        let hasSongs = !model.pieces.isEmpty
+        return ContentUnavailableView {
+            Label(hasSongs ? "Choose a song" : "Add a YouTube link to get started", systemImage: "pianokeys")
         } description: {
-            Text("Pick a piece from the list, or add the video of a song your child is learning.")
+            Text(hasSongs ? "Pick a song from the library to play the game or watch the video."
+                          : "Add the video of a song your child is learning.")
         } actions: {
+            if hasSongs && columnVisibility == .detailOnly {
+                Button { columnVisibility = .all } label: {
+                    Label("Show the library", systemImage: "sidebar.left")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+            }
             Button { showAddPiece = true } label: {
                 Label("Add a piece", systemImage: "plus")
             }

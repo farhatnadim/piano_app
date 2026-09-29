@@ -33,7 +33,8 @@ struct StaffGeometry {
 
     init(size: CGSize) {
         // Room for the two staves, the gap between them, two ledger lines above and below, and letters.
-        let spacing = max(6, min(16, size.height / 21, size.width / 26))
+        // Large enough to read comfortably on an iPad (up to 26 pt between lines), smaller on a phone.
+        let spacing = max(6, min(26, size.height / 21, size.width / 30))
         let gap = spacing * (size.height / spacing > 24 ? 4.5 : 3.5)
         let systemHeight = 8 * spacing + gap
         self.spacing = spacing
@@ -171,10 +172,16 @@ struct StaffScene {
             case .notRequired: color = Color.gray.opacity(0.4)
             }
 
-            // How long the note is held: a soft band behind the head.
+            // How long the note is held: a soft, hand-coloured band behind the head (grey would read as a staff line).
             if tailEnd - noteX > headWidth {
-                let band = CGRect(x: noteX, y: noteY - s * 0.2, width: tailEnd - noteX, height: s * 0.4)
-                context.fill(Path(roundedRect: band, cornerRadius: s * 0.2), with: .color(color.opacity(0.22 * max(fade, 0.3))))
+                let band = CGRect(x: noteX, y: noteY - s * 0.3, width: tailEnd - noteX, height: s * 0.6)
+                let bandColor: Color
+                switch status {
+                case .pending: bandColor = note.hand == .right ? GameColors.rightHand : GameColors.leftHand
+                default: bandColor = color
+                }
+                context.fill(Path(roundedRect: band, cornerRadius: s * 0.3),
+                             with: .color(bandColor.opacity(0.16 * max(fade, 0.3))))
             }
             guard fade > 0 else { continue }
 

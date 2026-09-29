@@ -195,5 +195,7 @@ final class GameEngineTests: XCTestCase {
         XCTAssertEqual(h.level, 5)
         XCTAssertTrue(h.usesBothHands)
         XCTAssertEqual(h.largestChord, 4)
+        // A beginner two-hand melody (like Ode to Joy with a bass note per bar) is level 2.
+        XCTAssertEqual(ChartDifficulty.estimate(chart).level, 2)
     }
 }

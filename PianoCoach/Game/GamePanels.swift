@@ -231,23 +231,27 @@ struct StartPanel: View {
         let selected = game.mode == mode
         let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
         return Button { game.mode = mode } label: {
+            // Explicit colours: hierarchical styles inside a button label take on the tint and wash out.
             VStack(alignment: .leading, spacing: 6) {
                 Image(systemName: systemImage)
                     .font(.title2)
-                    .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(selected ? Color.accentColor : Color.primary.opacity(0.6))
                 Text(mode.displayName)
                     .font(.title3.weight(.bold))
                     .foregroundStyle(Color.primary)
                 Text(explanation)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.primary.opacity(0.72))
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
             .padding(14)
-            .background { shape.fill(selected ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.05)) }
-            .overlay { shape.strokeBorder(selected ? Color.accentColor : Color.clear, lineWidth: 2.5) }
+            .background { shape.fill(selected ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.04)) }
+            .overlay {
+                shape.strokeBorder(selected ? Color.accentColor : Color.primary.opacity(0.15),
+                                   lineWidth: selected ? 2.5 : 1)
+            }
             .contentShape(shape)
         }
         .buttonStyle(PressableButtonStyle())
