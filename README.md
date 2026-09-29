@@ -49,6 +49,10 @@ demo song):
 |---|---|
 | ![Choosing Learn or Play, hands, view and speed](docs/screenshots/3-start.jpg) | ![Falling notes in landscape](docs/screenshots/4-keys-landscape.jpg) |
 
+| Notes in landscape | Library |
+|---|---|
+| ![The staff in landscape, played notes in green](docs/screenshots/5-notes-landscape.jpg) | ![Library with difficulty, level and best stars](docs/screenshots/6-library.jpg) |
+
 ## Video mode
 
 The *Video* tab plays the YouTube video itself and paces it to the child:

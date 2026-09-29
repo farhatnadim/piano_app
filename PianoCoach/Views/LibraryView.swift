@@ -202,7 +202,7 @@ private struct GameSummary: View {
                 .accessibilityLabel("Difficulty \(difficulty) of 5")
             }
             if let progress, progress.gamesPlayed > 0 {
-                Label("Level \(progress.level)", systemImage: "gamecontroller.fill")
+                IconText(text: "Level \(progress.level)", systemImage: "gamecontroller.fill")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.tint)
                 HStack(spacing: 0) {
@@ -224,12 +224,27 @@ private struct Badge: View {
     let systemImage: String
 
     var body: some View {
-        Label(text, systemImage: systemImage)
+        IconText(text: text, systemImage: systemImage)
             .font(.caption2.weight(.medium))
             .foregroundStyle(.secondary)
-            .lineLimit(1)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(.quaternary, in: Capsule())
+    }
+}
+
+/// A small icon and its text. (A `Label` here lost its text in the iPad sidebar, which lays out labels as
+/// row icons and titles.)
+private struct IconText: View {
+    let text: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: systemImage)
+            Text(text)
+                .lineLimit(1)
+                .fixedSize()
+        }
     }
 }
