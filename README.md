@@ -36,6 +36,19 @@ The app can't read notes directly out of a YouTube video, so it gets them one of
    and many tutorial channels offer them). Hands, note lengths and bar lines come straight from
    the file.
 
+### Screenshots (iPad)
+
+Captured automatically on an iPad Pro simulator by the CI build (`-screenshot-demo`, built-in
+demo song):
+
+| Keys view | Notes view |
+|---|---|
+| ![Falling notes over a lettered keyboard](docs/screenshots/1-keys.jpg) | ![Scrolling staff where notes light up](docs/screenshots/2-notes.jpg) |
+
+| Start screen | Landscape |
+|---|---|
+| ![Choosing Learn or Play, hands, view and speed](docs/screenshots/3-start.jpg) | ![Falling notes in landscape](docs/screenshots/4-keys-landscape.jpg) |
+
 ## Video mode
 
 The *Video* tab plays the YouTube video itself and paces it to the child:
