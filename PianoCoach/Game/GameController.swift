@@ -209,6 +209,14 @@ final class GameController {
         if chart != nil && phase != .finished { phase = .ready }
     }
 
+    /// Leaves the results for the start screen (`stop()` keeps them showing).
+    func closeResults() {
+        guard phase == .finished else { return }
+        stop()
+        speed = startSpeed
+        phase = chart == nil ? .noChart : .ready
+    }
+
     /// Changes the speed during a game (or the starting speed before one).
     func setSpeed(_ value: Double) {
         let clamped = max(0.3, min(1.2, value))
@@ -383,7 +391,11 @@ final class GameController {
         let outcome = engine.result
         result = outcome
         levelChange = onFinished?(outcome)
-        startSpeed = max(0.3, min(1.2, outcome.endSpeed))
+        // The next game starts at the new level ("Level up! Next time: 70 %").
+        switch levelChange {
+        case .up(let next)?, .down(let next)?: startSpeed = next
+        default: startSpeed = max(0.3, min(1.2, outcome.endSpeed))
+        }
         phase = .finished
         stopTimer()
         detachInput()

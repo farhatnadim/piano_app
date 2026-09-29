@@ -4,10 +4,11 @@ import SwiftUI
 import UIKit
 #endif
 
-/// The practice screen: the video with big controls underneath and the sheet music beside or below it.
+/// The practice screen, with a Game | Video switch at the top: the falling-notes game, or the video with
+/// big controls underneath and the sheet music beside or below it.
 ///
 /// Nothing is ever drawn on top of the YouTube player (YouTube's rules); the toast and banners live in
-/// the controls area and over the sheet music.
+/// the controls area and over the sheet music, and the game tab doesn't show the player at all.
 struct PracticeView: View {
     @Environment(AppModel.self) private var model
     /// Created in `.task` rather than as the property's initial value: SwiftUI evaluates `@State` initial
@@ -16,21 +17,16 @@ struct PracticeView: View {
     @State private var showSetup = false
 
     var body: some View {
-        GeometryReader { geo in
-            let beside = model.showSheet && showsSheetBeside(in: geo.size)
-            let metrics = PracticeMetrics(size: geo.size, beside: beside, showSheet: model.showSheet)
-            // One layout whose children keep their identity when switching between beside and below,
-            // so the player's web view is never re-created.
-            let layout = beside ? AnyLayout(HStackLayout(alignment: .top, spacing: 0))
-                                : AnyLayout(VStackLayout(spacing: 0))
-            layout {
-                playerColumn(metrics)
-                if model.showSheet {
-                    SheetPanel(controller: sheet) { showSetup = true }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+        Group {
+            switch model.practiceTab {
+            case .game:
+                GameScreen { showSetup = true }
+            case .video:
+                videoLayout
             }
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            PracticeTabPicker()
         }
         .overlay(alignment: .bottom) {
             ToastOverlay()
@@ -53,6 +49,25 @@ struct PracticeView: View {
         }
         .task {
             if sheet == nil { sheet = SheetMusicController() }
+        }
+    }
+
+    private var videoLayout: some View {
+        GeometryReader { geo in
+            let beside = model.showSheet && showsSheetBeside(in: geo.size)
+            let metrics = PracticeMetrics(size: geo.size, beside: beside, showSheet: model.showSheet)
+            // One layout whose children keep their identity when switching between beside and below,
+            // so the player's web view is never re-created.
+            let layout = beside ? AnyLayout(HStackLayout(alignment: .top, spacing: 0))
+                                : AnyLayout(VStackLayout(spacing: 0))
+            layout {
+                playerColumn(metrics)
+                if model.showSheet {
+                    SheetPanel(controller: sheet) { showSetup = true }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
         }
     }
 
@@ -95,6 +110,28 @@ struct PracticeView: View {
         case .below: return false
         case .automatic: return size.width >= 700 && size.width > size.height * 1.15
         }
+    }
+}
+
+// MARK: - Tabs
+
+/// Game | Video.
+private struct PracticeTabPicker: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        Picker("Practice", selection: $model.practiceTab) {
+            ForEach(PracticeTab.allCases) { tab in
+                Text(tab.displayName).tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(maxWidth: 320)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
     }
 }
 
