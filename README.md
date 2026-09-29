@@ -1,21 +1,52 @@
 # Piano Coach
 
-An iPhone, iPad and Mac app that helps a child practise piano with YouTube videos.
-It listens to the child playing and **paces the video to them**. When they slow down, the video
-slows down. When they stop, it waits. It never runs ahead. They can also **ask for the sheet
-music** and follow a cursor that moves with them.
+An iPhone, iPad and Mac app that helps a child learn piano from YouTube songs.
+
+## The game
+
+Each song in the library becomes a **falling-notes game**, like Guitar Hero or Synthesia but for a
+real piano. Notes fall onto a keyboard. When the child plays the right note, the key lights up
+**green**; a wrong note lights **red**.
+
+- **Two views.** *Keys* shows the falling notes and the keyboard labelled with letter names
+  (C, D, E…). *Notes* shows a scrolling music staff to learn reading notes; each note lights up as
+  it's played. Letter names can be turned off.
+- **Two modes.** *Learn*: each note waits at the line until it's played. *Play*: the notes keep
+  falling and the child scores points and combos for playing on time.
+- **The speed adapts to the child.** If he plays slowly, makes the notes wait or misses, the game
+  slows down. When he plays accurately and on time, it speeds up a little.
+- **Levels.** Each song remembers its level (its starting speed). A great game (3 stars) moves
+  the next game up 10 %; a hard one moves it back down. The library shows each song's difficulty,
+  level and best stars.
+- **Practise one hand.** Choose right or left hand; the app can play the other hand along with him.
+- **Listen first.** The built-in piano plays the song at the current speed while the notes fall.
+- **Input.** The device's microphone listens to any piano; a USB/Bluetooth MIDI keyboard gives
+  exact notes. The on-screen keyboard can be tapped too (and on a Mac the keys A W S E D F T G Y H
+  U J K play C4–C5), which is handy for trying the game without a piano.
+
+### Where the game's notes come from
+
+The app can't read notes directly out of a YouTube video, so it gets them one of two ways:
+
+1. **By listening (automatic).** *Listen to the video to make the game* plays the video once with
+   the sound on while the app listens through the microphone and works out the notes. It's easy,
+   but approximate: melodies and simple two-hand pieces come out well; dense chords and octaves
+   can have mistakes.
+2. **From sheet music (exact).** Import a **MIDI** or **MusicXML** file for the song (MuseScore
+   and many tutorial channels offer them). Hands, note lengths and bar lines come straight from
+   the file.
+
+## Video mode
+
+The *Video* tab plays the YouTube video itself and paces it to the child:
 
 - **Wait for me** – the video pauses when the child stops playing and continues when they start
-  again. Works with any video, no setup.
-- **Follow me** – the coach knows where the child is in the piece and keeps the video at their
-  position and speed. It slows the video, pauses it when it gets ahead, and jumps back when they
-  restart a passage. It needs either a *learned* version of the song (the coach listens to the video
-  once) or sheet music that has been synced to the video.
-- **Voice commands** – "slower", "pause", "show the music", "go back", "measure twelve",
-  "follow me"… (full list below). Recognition runs on the device.
-- **Sheet music** – MusicXML (with a moving cursor; tap a measure to jump there), PDF or a photo,
-  shown beside or below the video.
-- **Note input** – the device's microphone, or (most accurate) a USB/Bluetooth MIDI keyboard.
+  again.
+- **Follow me** – the video follows the child's position and speed (slower, pause when ahead,
+  jump back when they restart). It needs the learned song or synced sheet music.
+- **Voice commands** – "slower", "pause", "show the music", "go back", "measure twelve"… (see below).
+- **Sheet music** – MusicXML with a moving cursor (tap a measure to jump there), PDF or a photo,
+  beside or below the video.
 
 ## Build and run
 
@@ -38,17 +69,15 @@ If you prefer generating the project, `project.yml` describes the same project f
 ## First practice session
 
 1. **+** → paste a YouTube link (the title is filled in automatically).
-2. Press **Wait for me** and let your child play along. The video mutes while the coach listens, so
-   the microphone hears the piano rather than the video. Change this in Settings if you use
-   headphones or a MIDI keyboard.
-3. For **Follow me**, tap **Set up** and choose one:
-   - **Teach the coach** → *Start listening*: the video plays once with the sound on while the coach listens
-     (keep the room quiet and the volume up). Done.
-   - **Sheet music**: import a MusicXML file (MuseScore → *Export → MusicXML*) or a MIDI file, then
-     sync it to the video. Either press *The first note is here* when the first note plays and
-     set the tempo, or use *Tap along with the video…*, tapping on the first beat of every measure while
-     the video plays. PDFs and photos can be shown but not followed.
-4. Say **"show the music"** or tap **Music** to see the sheet beside or below the video.
+2. Open the song. The **Game** tab needs the song's notes the first time: either tap *Listen to
+   the video to make the game* (keep the room quiet and the volume up while the video plays once),
+   or tap **Set up** and import a MIDI/MusicXML file.
+3. Pick *Learn* or *Play*, a hand, *Keys* or *Notes*, and press **Start**. Try *Listen first* to
+   hear it.
+4. In the **Video** tab, press **Wait for me** or **Follow me** to have the video keep pace. The
+   video mutes while the coach listens so the microphone hears the piano, not the video (change
+   this in Settings if you use headphones or a MIDI keyboard). For sheet music in video mode, sync
+   it in **Set up**: *The first note is here* + tempo, or *Tap along with the video…*.
 
 Try it with `Samples/Ode to Joy (easy).musicxml` and any easy "Ode to Joy" piano tutorial.
 
@@ -96,6 +125,18 @@ reference track ───────────────┘   (where is the
 - **Pacing**: the playback rate follows the child's speed plus a correction that closes the gap,
   quantised to the rates YouTube supports (0.25× steps) with a dwell time to avoid flapping. The
   video pauses when it gets ahead or the child goes quiet, and it seeks when the child jumps.
+
+- **The game** (`GameEngine`): a playhead moves through the song's notes at the chosen speed.
+  In *Learn* mode it stops at each chord until every required note is played. In *Play* mode,
+  notes played within 0.1 s are *perfect*, within 0.25 s *good*, and later ones are *missed*.
+  Every chord gives a "struggle" score (waiting long, playing late, missing or wrong notes count
+  up; quick and on-time count down). When the last 8 chords average clearly high the speed drops
+  15 %; when clearly low it rises 8 %. Microphone input is matched to the expected chord by its
+  pitch content, while MIDI input is matched note by note.
+- **Working out notes by listening** (`NoteTranscriber`): at each attack the strongest piano key
+  is taken, checked against being the octave of a weaker bass note, and the energy its harmonics
+  explain is subtracted before looking for the next note. On synthesized two-hand playing this
+  gets about 89 % of notes right.
 
 The engine is the Swift package in `Packages/PianoCoachCore`. It uses Foundation only and has more
 than 200 unit tests, including end-to-end tests that synthesise piano audio of a "child" playing at

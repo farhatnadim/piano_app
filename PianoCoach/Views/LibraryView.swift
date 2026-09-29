@@ -170,6 +170,9 @@ private struct PieceRow: View {
                         }
                     }
                 }
+                if piece.difficulty != nil || piece.game != nil {
+                    GameSummary(difficulty: piece.difficulty, progress: piece.game)
+                }
             }
         }
         .padding(.vertical, 4)
@@ -177,6 +180,42 @@ private struct PieceRow: View {
 
     private var hasBadges: Bool {
         piece.sheet != nil || piece.displaySheet != nil || piece.hasLearnedTrack || isLooping
+    }
+}
+
+/// How hard the song is and how the child is doing in the game.
+private struct GameSummary: View {
+    let difficulty: Int?
+    let progress: GameProgress?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let difficulty {
+                HStack(spacing: 1) {
+                    ForEach(1...5, id: \.self) { i in
+                        Image(systemName: i <= difficulty ? "circle.fill" : "circle")
+                            .font(.system(size: 6))
+                    }
+                }
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Difficulty \(difficulty) of 5")
+            }
+            if let progress, progress.gamesPlayed > 0 {
+                Label("Level \(progress.level)", systemImage: "gamecontroller.fill")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.tint)
+                HStack(spacing: 0) {
+                    ForEach(0..<3, id: \.self) { i in
+                        Image(systemName: i < progress.bestStars ? "star.fill" : "star")
+                            .font(.system(size: 9))
+                    }
+                }
+                .foregroundStyle(.yellow)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Best: \(progress.bestStars) stars")
+            }
+        }
     }
 }
 

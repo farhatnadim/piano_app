@@ -258,6 +258,25 @@ final class GameController {
 
     // MARK: - Input
 
+    /// A key pressed on the on-screen keyboard (or the Mac's keyboard): sounds it and plays it into the game.
+    func tapKey(_ midi: Int) {
+        try? sound.start()
+        sound.noteOn(midi, velocity: 0.7)
+        let release = midi
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            self?.sound.noteOff(release)
+        }
+        glow(midi, .pressed, for: 0.3)
+        refreshGlows(now: MonotonicClock.now())
+        guard phase == .playing, let engine else { return }
+        let now = MonotonicClock.now()
+        let onset = NoteOnset(time: now, strength: 1, levelDB: -20, features: .template(forPitches: [midi]),
+                              midiPitches: [midi])
+        engine.handle(onset, at: now)
+        consumeEvents()
+    }
+
     private func attachInput() {
         coach.noteObserver = { [weak self] onset, clock in self?.heard(onset, at: clock) }
         coach.keyObserver = { [weak self] key, down in self?.key(key, down: down) }
