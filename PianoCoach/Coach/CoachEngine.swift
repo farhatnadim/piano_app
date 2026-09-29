@@ -109,6 +109,11 @@ final class CoachEngine {
         analysis.onResult = { [weak self] onsets, level in
             self?.analysisDidProduce(onsets, levelDB: level)
         }
+        let worker = analysis
+        audio.onRestart = { _ in worker.reset() }
+        audio.onFailure = { [weak self] error in
+            Task { @MainActor in self?.audioDidFail(error) }
+        }
         player.onUpdate = { [weak self] in self?.playerDidUpdate() }
         player.onExternalPlayPause = { [weak self] playing in
             guard let self else { return }
@@ -254,6 +259,13 @@ final class CoachEngine {
         midi.stop()
         isListening = false
         inputLevel = 0
+    }
+
+    private func audioDidFail(_ error: Error) {
+        guard noteSource == .microphone else { return }
+        isListening = false
+        inputLevel = 0
+        listeningError = "The microphone stopped: \(error.localizedDescription)"
     }
 
     private func restartListening() {

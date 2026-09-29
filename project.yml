@@ -1,0 +1,163 @@
+# XcodeGen spec for PianoCoach.xcodeproj (fallback if the checked-in project ever needs regenerating).
+#   brew install xcodegen && xcodegen
+# It describes the same project: one native multiplatform app target (iPhone, iPad, Mac; not Catalyst)
+# built from the synchronized PianoCoach/ folder, the WebAssets/ folder copied into the bundle as a
+# folder, and the local PianoCoachCore package.
+name: PianoCoach
+
+options:
+  minimumXcodeGenVersion: 2.45.4
+  projectFormat: xcode16_0
+  xcodeVersion: "16.0"
+  developmentLanguage: en
+  settingPresets: none # every setting is spelled out below, as Xcode 16's multiplatform template does
+
+packages:
+  PianoCoachCore:
+    path: Packages/PianoCoachCore
+
+settings:
+  base:
+    ALWAYS_SEARCH_USER_PATHS: "NO"
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: "YES"
+    CLANG_ANALYZER_NONNULL: "YES"
+    CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION: YES_AGGRESSIVE
+    CLANG_CXX_LANGUAGE_STANDARD: gnu++20
+    CLANG_ENABLE_MODULES: "YES"
+    CLANG_ENABLE_OBJC_ARC: "YES"
+    CLANG_ENABLE_OBJC_WEAK: "YES"
+    CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING: "YES"
+    CLANG_WARN_BOOL_CONVERSION: "YES"
+    CLANG_WARN_COMMA: "YES"
+    CLANG_WARN_CONSTANT_CONVERSION: "YES"
+    CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS: "YES"
+    CLANG_WARN_DIRECT_OBJC_ISA_USAGE: YES_ERROR
+    CLANG_WARN_DOCUMENTATION_COMMENTS: "YES"
+    CLANG_WARN_EMPTY_BODY: "YES"
+    CLANG_WARN_ENUM_CONVERSION: "YES"
+    CLANG_WARN_INFINITE_RECURSION: "YES"
+    CLANG_WARN_INT_CONVERSION: "YES"
+    CLANG_WARN_NON_LITERAL_NULL_CONVERSION: "YES"
+    CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF: "YES"
+    CLANG_WARN_OBJC_LITERAL_CONVERSION: "YES"
+    CLANG_WARN_OBJC_ROOT_CLASS: YES_ERROR
+    CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER: "YES"
+    CLANG_WARN_RANGE_LOOP_ANALYSIS: "YES"
+    CLANG_WARN_STRICT_PROTOTYPES: "YES"
+    CLANG_WARN_SUSPICIOUS_MOVE: "YES"
+    CLANG_WARN_UNGUARDED_AVAILABILITY: YES_AGGRESSIVE
+    CLANG_WARN_UNREACHABLE_CODE: "YES"
+    CLANG_WARN__DUPLICATE_METHOD_MATCH: "YES"
+    COPY_PHASE_STRIP: "NO"
+    ENABLE_STRICT_OBJC_MSGSEND: "YES"
+    ENABLE_USER_SCRIPT_SANDBOXING: "YES"
+    GCC_C_LANGUAGE_STANDARD: gnu17
+    GCC_NO_COMMON_BLOCKS: "YES"
+    GCC_WARN_64_TO_32_BIT_CONVERSION: "YES"
+    GCC_WARN_ABOUT_RETURN_TYPE: YES_ERROR
+    GCC_WARN_UNDECLARED_SELECTOR: "YES"
+    GCC_WARN_UNINITIALIZED_AUTOS: YES_AGGRESSIVE
+    GCC_WARN_UNUSED_FUNCTION: "YES"
+    GCC_WARN_UNUSED_VARIABLE: "YES"
+    LOCALIZATION_PREFERS_STRING_CATALOGS: "YES"
+    MTL_FAST_MATH: "YES"
+  configs:
+    Debug:
+      DEBUG_INFORMATION_FORMAT: dwarf
+      ENABLE_TESTABILITY: "YES"
+      GCC_DYNAMIC_NO_PIC: "NO"
+      GCC_OPTIMIZATION_LEVEL: "0"
+      GCC_PREPROCESSOR_DEFINITIONS: ["DEBUG=1", "$(inherited)"]
+      MTL_ENABLE_DEBUG_INFO: INCLUDE_SOURCE
+      ONLY_ACTIVE_ARCH: "YES"
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG $(inherited)
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+    Release:
+      DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+      ENABLE_NS_ASSERTIONS: "NO"
+      MTL_ENABLE_DEBUG_INFO: "NO"
+      SWIFT_COMPILATION_MODE: wholemodule
+
+targets:
+  PianoCoach:
+    type: application
+    platform: auto
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: PianoCoach
+        type: syncedFolder
+        excludes:
+          - PianoCoach.entitlements # used for code signing only; never a bundle resource
+      - path: WebAssets
+        type: folder # copied as a folder: <bundle>/WebAssets/{sheet.html, youtube_player.html, opensheetmusicdisplay.min.js}
+        buildPhase: resources
+    dependencies:
+      - package: PianoCoachCore
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        # macOS only: iOS apps are always sandboxed and must not carry these entitlements.
+        CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: PianoCoach/PianoCoach.entitlements
+        CODE_SIGN_STYLE: Automatic
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: ""
+        # Mirrors PianoCoach.entitlements (Xcode 26 shows the App Sandbox capability from these).
+        ENABLE_APP_SANDBOX[sdk=macosx*]: "YES"
+        ENABLE_HARDENED_RUNTIME: "YES"
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS[sdk=macosx*]: "YES"
+        ENABLE_PREVIEWS: "YES"
+        ENABLE_RESOURCE_ACCESS_AUDIO_INPUT[sdk=macosx*]: "YES"
+        ENABLE_RESOURCE_ACCESS_BLUETOOTH[sdk=macosx*]: "YES"
+        ENABLE_RESOURCE_ACCESS_USB[sdk=macosx*]: "YES"
+        ENABLE_USER_SELECTED_FILES[sdk=macosx*]: readonly
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_CFBundleDisplayName: Piano Coach
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: "NO"
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.music
+        INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: Piano Coach uses Bluetooth to connect to a Bluetooth MIDI keyboard or digital piano, so it knows exactly which notes are played.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: 'Piano Coach listens to the piano so the video can slow down, wait and keep pace with the player. It also hears voice commands like "slower" and "pause".'
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: 'Lets you control the video with your voice, like "slower", "pause" or "show the music". This happens on the device when possible; otherwise Apple''s speech service is used.'
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]: "YES"
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]: "YES"
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]: "YES"
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]: "YES"
+        INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]: "YES"
+        INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]: "YES"
+        INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]: UIStatusBarStyleDefault
+        INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]: UIStatusBarStyleDefault
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path/Frameworks"
+        LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]: "@executable_path/../Frameworks"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        MARKETING_VERSION: "1.0"
+        PRODUCT_BUNDLE_IDENTIFIER: com.farhatnadim.PianoCoach
+        PRODUCT_NAME: $(TARGET_NAME)
+        SDKROOT: auto
+        SUPPORTED_PLATFORMS: iphoneos iphonesimulator macosx
+        SUPPORTS_MACCATALYST: "NO"
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: "NO"
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: "NO"
+        SWIFT_EMIT_LOC_STRINGS: "YES"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+
+schemes:
+  PianoCoach:
+    build:
+      targets:
+        PianoCoach: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - package: PianoCoachCore/PianoCoachCoreTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
