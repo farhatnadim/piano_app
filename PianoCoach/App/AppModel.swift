@@ -43,6 +43,8 @@ final class AppModel {
     var showVoiceHelp = false
     /// Presents the screen that cuts a video's introduction or ending off the song's notes.
     var showTrimScreen = false
+    /// Presents the note editor: the song's notes alongside the video, to fix by hand.
+    var showNoteEditor = false
     /// A short confirmation shown after a voice command ("Slower · 60 %").
     private(set) var toast: String?
     @ObservationIgnored private var toastTask: Task<Void, Never>?
@@ -211,6 +213,7 @@ final class AppModel {
             do {
                 let score = try ScoreLoader.loadScore(from: try store.data(for: sheet), kind: sheet.kind)
                 chart = NoteChart.from(score: score, title: piece.title)
+                chart?.videoTimeOfBeatZero = piece.songInfo?.videoTimeOfBeatZero
             } catch {
                 notesError = "Couldn't read the notes in “\(sheet.originalName)”."
             }
@@ -274,7 +277,8 @@ final class AppModel {
             if let old = piece.sheet { store.removeAttachment(old) }
             piece.sheet = attachment
             piece.songInfo = SongInfo(origin: origin, keyName: song.keyName, tempoBPM: song.tempoBPM,
-                                      noteCount: song.score.notes.count)
+                                      noteCount: song.score.notes.count,
+                                      videoTimeOfBeatZero: song.timeOfBeatZero.isFinite ? song.timeOfBeatZero : nil)
             update(piece)
         } catch {
             libraryError = "Couldn't save the song's notes: \(error.localizedDescription)"
@@ -343,6 +347,50 @@ final class AppModel {
         }
         loadNotes(for: piece)
         showToast("Kept \(trimmed.notes.count) notes")
+    }
+
+    // MARK: - Editing notes
+
+    /// Shows the note editor for the open song (loads its video if needed).
+    func showNoteEditorScreen() {
+        guard let piece = openPiece, game.fullChart != nil else { return }
+        game.stop()
+        if player.videoID != piece.videoID, loadsVideos { player.load(videoID: piece.videoID, startTime: 0, muted: false) }
+        showNoteEditor = true
+    }
+
+    /// Leaves the note editor.
+    func closeNoteEditor() {
+        player.pause()
+        showNoteEditor = false
+        stopMicrophoneIfIdle()
+    }
+
+    /// Replaces the open song's notes with `notes` (edited by hand), remembering where its beat 0 falls
+    /// in the video, and reloads the game.
+    func saveEditedNotes(_ notes: [ScoreNote], videoTimeOfBeatZero: Double?) {
+        guard let store, var piece = openPiece, let score = openScore(),
+              let edited = score.rebuilt(withNotes: notes) else {
+            libraryError = "There would be no notes left."
+            return
+        }
+        game.stop()
+        do {
+            let attachment = try store.importAttachment(data: MIDIFileWriter.data(for: edited), fileExtension: "mid",
+                                                        originalName: "\(piece.title).mid")
+            if let old = piece.sheet { store.removeAttachment(old) }
+            piece.sheet = attachment
+            var info = piece.songInfo ?? SongInfo(origin: .sheetMusic, tempoBPM: edited.initialTempoBPM, noteCount: 0)
+            info.noteCount = edited.notes.count
+            info.videoTimeOfBeatZero = videoTimeOfBeatZero
+            piece.songInfo = info
+            update(piece)
+        } catch {
+            libraryError = "Couldn't save the notes: \(error.localizedDescription)"
+            return
+        }
+        loadNotes(for: piece)
+        showToast("Notes saved")
     }
 
     enum ImportError: LocalizedError {
@@ -421,7 +469,7 @@ final class AppModel {
     }
 
     #if DEBUG
-    /// Screenshot mode used by CI: `-screenshot-demo keys|notes|start|learn|trim [landscape]` opens a built-in
+    /// Screenshot mode used by CI: `-screenshot-demo keys|notes|start|learn|trim|edit [landscape]` opens a built-in
     /// song (without voice commands, so no permission prompts cover the screen).
     private func startScreenshotDemoIfRequested() {
         let arguments = ProcessInfo.processInfo.arguments
@@ -472,6 +520,10 @@ final class AppModel {
             self.game.display = scene.contains("notes") ? .notes : .keys
             if scene.contains("trim") {
                 self.showTrimScreen = true
+                return
+            }
+            if scene.contains("edit") {
+                self.showNoteEditorScreen()
                 return
             }
             guard !scene.contains("start") else { return }

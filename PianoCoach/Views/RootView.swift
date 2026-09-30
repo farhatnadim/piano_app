@@ -53,6 +53,16 @@ struct RootView: View {
             .frame(minWidth: 520, idealWidth: 640, minHeight: 440, idealHeight: 480)
             #endif
         }
+        #if os(iOS)
+        .fullScreenCover(isPresented: $model.showNoteEditor, onDismiss: { model.closeNoteEditor() }) {
+            noteEditor
+        }
+        #else
+        .sheet(isPresented: $model.showNoteEditor, onDismiss: { model.closeNoteEditor() }) {
+            noteEditor
+                .frame(minWidth: 720, idealWidth: 900, minHeight: 600, idealHeight: 700)
+        }
+        #endif
         .sheet(isPresented: $showAddPiece) {
             AddPieceView()
                 .environment(model)
@@ -80,5 +90,16 @@ struct RootView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
         }
+    }
+
+    /// The note editor takes the whole screen: the video on top, the notes with room to scroll underneath.
+    private var noteEditor: some View {
+        NavigationStack {
+            if let chart = model.game.fullChart, let score = model.openScore() {
+                NoteEditorView(score: score, chart: chart)
+                    .environment(model)
+            }
+        }
+        .interactiveDismissDisabled()
     }
 }

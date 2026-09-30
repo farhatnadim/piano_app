@@ -9,11 +9,19 @@ public enum SongTranscriber {
     /// recording (less a short margin): silence at the start is trimmed.
     public static func notes(inRecording samples: [Float], sampleRate: Double, progress: ((Double) -> Void)? = nil,
                              runModel: ([Float]) throws -> (note: [Float], onset: [Float])) rethrows -> [TranscribedNote] {
-        guard !samples.isEmpty, sampleRate > 0 else { return [] }
+        try transcribe(recording: samples, sampleRate: sampleRate, progress: progress, runModel: runModel).notes
+    }
+
+    /// Like `notes(inRecording:...)`, also saying how many seconds of silence were cut from the start of
+    /// the recording (so note times + `trimmedSeconds` = recording time).
+    public static func transcribe(recording samples: [Float], sampleRate: Double, progress: ((Double) -> Void)? = nil,
+                                  runModel: ([Float]) throws -> (note: [Float], onset: [Float]))
+        rethrows -> (notes: [TranscribedNote], trimmedSeconds: Double) {
+        guard !samples.isEmpty, sampleRate > 0 else { return ([], 0) }
         let audio = sampleRate == BasicPitch.sampleRate ? samples : BasicPitch.resample(samples, from: sampleRate)
-        let prepared = RecordingCleanup.prepare(audio, sampleRate: BasicPitch.sampleRate).samples
+        let (prepared, trimmed) = RecordingCleanup.prepare(audio, sampleRate: BasicPitch.sampleRate)
         let notes = try BasicPitch.transcribe(samples: prepared, progress: progress, runModel: runModel)
         let sounding = RecordingCleanup.droppingNotesInSilence(notes, samples: prepared, sampleRate: BasicPitch.sampleRate)
-        return SpectralNoteFilter.supportedNotes(sounding, samples: prepared, sampleRate: BasicPitch.sampleRate)
+        return (SpectralNoteFilter.supportedNotes(sounding, samples: prepared, sampleRate: BasicPitch.sampleRate), trimmed)
     }
 }

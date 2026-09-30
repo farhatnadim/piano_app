@@ -18,9 +18,20 @@ public enum ScoreTrimmer {
             notes.append(kept)
         }
         guard !notes.isEmpty else { return nil }
-
         let signature = score.measureIndex(atBeat: start).map { score.measures[$0].timeSignature }
             ?? score.measures.first?.timeSignature ?? .common
+        return score.rebuilt(withNotes: notes, timeSignature: signature)
+    }
+}
+
+extension Score {
+    /// This score with `notes` in place of its own: measures laid out again from beat 0 with
+    /// `timeSignature`, events rebuilt from the notes (notes struck within a 960th of a beat share one
+    /// onset), everything else kept. For editing a song's notes. Nil when there are no notes.
+    public func rebuilt(withNotes notes: [ScoreNote], timeSignature signature: TimeSignature? = nil) -> Score? {
+        let notes = notes.filter { $0.beat.isFinite && $0.beat >= 0 }.sorted { ($0.beat, $0.midi) < ($1.beat, $1.midi) }
+        guard !notes.isEmpty else { return nil }
+        let signature = signature ?? measures.first?.timeSignature ?? .common
         let measureLength = signature.quarterBeatsPerMeasure
         let lastOnset = notes.map(\.beat).max() ?? 0
         let end = notes.map { $0.beat + $0.durationBeats }.max() ?? 0
@@ -56,10 +67,10 @@ public enum ScoreTrimmer {
                 : scoreNotes.filter { $0.beat == events[k].beat }.map(\.durationBeats).max() ?? 0
         }
 
-        var trimmed = score
-        trimmed.measures = measures
-        trimmed.events = events
-        trimmed.notes = scoreNotes.sorted { ($0.beat, $0.midi) < ($1.beat, $1.midi) }
-        return trimmed
+        var rebuilt = self
+        rebuilt.measures = measures
+        rebuilt.events = events
+        rebuilt.notes = scoreNotes
+        return rebuilt
     }
 }

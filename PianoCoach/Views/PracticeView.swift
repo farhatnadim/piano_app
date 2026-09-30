@@ -96,6 +96,9 @@ private struct SongMenu: View {
                 Label("Use a MIDI or MusicXML file…", systemImage: "doc.badge.plus")
             }
             if !model.needsLearning, model.game.fullChart != nil {
+                Button { model.showNoteEditorScreen() } label: {
+                    Label("Fix the notes with the video…", systemImage: "slider.horizontal.below.square.and.square.filled")
+                }
                 Button { model.showTrimScreen = true } label: {
                     Label("Trim the start or end…", systemImage: "scissors")
                 }

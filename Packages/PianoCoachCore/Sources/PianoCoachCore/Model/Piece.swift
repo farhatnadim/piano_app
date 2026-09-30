@@ -71,13 +71,18 @@ public struct SongInfo: Codable, Hashable, Sendable {
     public var tempoBPM: Double?
     public var noteCount: Int
     public var date: Date
+    /// Seconds into the video where the notes' beat 0 falls (learned songs), so the notes can be shown
+    /// and heard in time with the video.
+    public var videoTimeOfBeatZero: Double?
 
-    public init(origin: NotesOrigin, keyName: String? = nil, tempoBPM: Double? = nil, noteCount: Int, date: Date = Date()) {
+    public init(origin: NotesOrigin, keyName: String? = nil, tempoBPM: Double? = nil, noteCount: Int, date: Date = Date(),
+                videoTimeOfBeatZero: Double? = nil) {
         self.origin = origin
         self.keyName = keyName
         self.tempoBPM = tempoBPM
         self.noteCount = noteCount
         self.date = date
+        self.videoTimeOfBeatZero = videoTimeOfBeatZero
     }
 }
 

@@ -54,6 +54,9 @@ final class SongLearner {
     /// Bumped whenever a session starts or is cancelled, so late callbacks from an old one are ignored.
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var playingSince: Double?
+    /// Recording seconds minus video seconds when the video was first seen playing: turns a time in the
+    /// recording into a time in the video (nil for audio files).
+    @ObservationIgnored private var recordingLead: Double?
     @ObservationIgnored private var sawPlayback = false
     @ObservationIgnored private var lastPlayRequest: Double = 0
 
@@ -81,6 +84,7 @@ final class SongLearner {
         usesMicrophone = false
         sawPlayback = false
         playingSince = nil
+        recordingLead = nil
         phase = .starting
         Task { [weak self] in
             guard let self else { return }
@@ -214,7 +218,10 @@ final class SongLearner {
                 let now = MonotonicClock.now()
                 if self.player.state == .playing {
                     self.sawPlayback = true
-                    if self.playingSince == nil { self.playingSince = now }
+                    if self.playingSince == nil {
+                        self.playingSince = now
+                        self.recordingLead = stats.seconds - self.player.currentTime
+                    }
                 } else if !self.sawPlayback, self.player.state != .buffering, now - self.lastPlayRequest > 2 {
                     // The player wasn't ready yet (or ignored the request): ask again.
                     self.playFromStart()
@@ -241,6 +248,7 @@ final class SongLearner {
         guard gen == generation else { return }
         collector.reset()
         playingSince = nil
+        recordingLead = nil
         sawPlayback = false
         guard await startMicrophone(generation: gen), gen == generation else {
             if gen == generation {
@@ -287,6 +295,7 @@ final class SongLearner {
         self.pieceID = pieceID
         let gen = generation
         let maxSeconds = Self.maxSeconds
+        recordingLead = nil
         phase = .transcribing(0)
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
@@ -368,8 +377,14 @@ final class SongLearner {
             guard let self, gen == self.generation else { return }
             self.work = nil
             switch result {
-            case .success(let song):
+            case .success(var song):
                 self.phase = .idle
+                // Beat 0 in seconds of the video (the recording ran ahead of the video by `recordingLead`).
+                if origin == .video, let lead = self.recordingLead {
+                    song.timeOfBeatZero -= lead
+                } else if origin != .video {
+                    song.timeOfBeatZero = .nan
+                }
                 self.onLearned?(song, origin, pieceID)
             case .failure(let error) where error is CancellationError:
                 self.phase = .idle
@@ -384,13 +399,15 @@ final class SongLearner {
                                              progress: @escaping @Sendable (Double) -> Void) throws -> ArrangedSong {
         guard !samples.isEmpty else { throw LearnError.noSound }
         let model = try loadModel()
-        let notes = try SongTranscriber.notes(inRecording: samples, sampleRate: sampleRate,
-                                              progress: { progress($0 * 0.95) }) { window in
+        let (notes, trimmed) = try SongTranscriber.transcribe(recording: samples, sampleRate: sampleRate,
+                                                              progress: { progress($0 * 0.95) }) { window in
             try Task.checkCancellation()
             return try model.run(window: window)
         }
         try Task.checkCancellation()
-        guard let song = SongArranger.arrange(notes, title: title) else { throw LearnError.noNotes }
+        guard var song = SongArranger.arrange(notes, title: title) else { throw LearnError.noNotes }
+        // Note times count from the first sound; put beat 0 back into seconds of the whole recording.
+        song.timeOfBeatZero += trimmed
         progress(1)
         return song
     }
