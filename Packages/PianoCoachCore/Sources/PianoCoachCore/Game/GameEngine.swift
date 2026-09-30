@@ -192,6 +192,8 @@ public final class GameEngine {
                     judge(note: note, chord: best.chord, position: pos, clock: clock)
                 }
             } else if best == nil || (best?.similarity ?? 0) < configuration.chordSimilarity * 0.7 {
+                // Only a clear note can be a wrong note: a clap, a cough or a word isn't playing at all.
+                guard onset.features.isPitched else { return }
                 let guess = NoteTranscriber.pitches(in: onset.features, maxNotes: 1).first
                 if !(guess.map { isOtherHandNote(midi: $0, position: pos, window: window) } ?? false) {
                     wrongNote(guess)

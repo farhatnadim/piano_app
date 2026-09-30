@@ -57,6 +57,18 @@ public struct FeatureVector: Codable, Hashable, Sendable {
     /// True when the vector carries no energy.
     public var isZero: Bool { !semitones.contains { $0 > 0 } }
 
+    /// Whether the sound is a note (or a small chord) rather than noise: a played piano note puts most of
+    /// its energy into a few keys — its own and its overtones — while a clap, a cough or talking spreads it
+    /// over the whole keyboard. Compares the five strongest keys with the rest (L2-normalised: a note with
+    /// its overtones scores about 0.9, wide-band noise well under 0.5).
+    public var isPitched: Bool {
+        let sorted = semitones.sorted(by: >)
+        guard let strongest = sorted.first, strongest > 0 else { return false }
+        var top: Float = 0
+        for v in sorted.prefix(5) { top += v * v }
+        return top >= 0.55
+    }
+
     /// Cosine similarity in 0...1 blending the semitone and chroma views.
     /// `chromaWeight` 0 uses only semitones, 1 only chroma.
     public func similarity(to other: FeatureVector, chromaWeight: Float = 0.5) -> Float {

@@ -405,12 +405,8 @@ final class GameController {
 
     private func heard(_ onset: NoteOnset, at clock: Double) {
         guard phase == .playing, let engine else { return }
-        // Light the keys the microphone heard (MIDI keys light from key events).
-        if onset.midiPitches == nil {
-            for midi in NoteTranscriber.pitches(in: onset.features, maxNotes: 3) {
-                glow(midi, .pressed, for: 0.25)
-            }
-        }
+        // What the microphone hears shows only as the game's verdict (green or red); guessing which keys
+        // it heard lit up overtones and room noise all over the keyboard. MIDI keys light from key events.
         engine.handle(onset, at: clock)
         consumeEvents()
     }

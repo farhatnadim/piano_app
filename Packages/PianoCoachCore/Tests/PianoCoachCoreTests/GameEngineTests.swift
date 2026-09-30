@@ -218,3 +218,41 @@ final class GameEngineTests: XCTestCase {
         XCTAssertEqual(ChartDifficulty.estimate(chart).level, 2)
     }
 }
+
+final class FeatureVectorPitchednessTests: XCTestCase {
+    func testANoteWithOvertonesIsPitched() {
+        XCTAssertTrue(FeatureVector.template(forPitches: [60]).isPitched)
+        XCTAssertTrue(FeatureVector.template(forPitches: [60, 64]).isPitched)
+    }
+
+    func testWideBandNoiseIsNot() {
+        var state: UInt32 = 7
+        let noise = (0..<FeatureVector.semitoneCount).map { _ -> Float in
+            state = state &* 1_664_525 &+ 1_013_904_223
+            return 0.5 + Float(state >> 8) / Float(1 << 24)
+        }
+        XCTAssertFalse(FeatureVector(semitones: noise).isPitched)
+        XCTAssertFalse(FeatureVector.zero.isPitched)
+    }
+
+    func testNoiseIsNotAWrongNote() {
+        let chart = NoteChart(title: "t", notes: [ChartNote(id: 0, midi: 60, time: 0, duration: 1, hand: .right)],
+                              beatsPerMinute: 60, source: .score)
+        var configuration = GameConfiguration()
+        configuration.mode = .learn
+        let engine = GameEngine(chart: chart, configuration: configuration)
+        engine.start(at: 0)
+        engine.update(to: configuration.leadInSeconds + 0.1)
+        var state: UInt32 = 3
+        let noise = (0..<FeatureVector.semitoneCount).map { _ -> Float in
+            state = state &* 1_664_525 &+ 1_013_904_223
+            return 0.5 + Float(state >> 8) / Float(1 << 24)
+        }
+        engine.handle(NoteOnset(time: 0, strength: 1, levelDB: -20, features: FeatureVector(semitones: noise)),
+                      at: configuration.leadInSeconds + 0.1)
+        XCTAssertEqual(engine.stats.wrongNotes, 0)
+        engine.handle(NoteOnset(time: 0, strength: 1, levelDB: -20, features: .template(forPitches: [72 + 7])),
+                      at: configuration.leadInSeconds + 0.1)
+        XCTAssertEqual(engine.stats.wrongNotes, 1, "a clear note that isn't the one asked for is wrong")
+    }
+}
