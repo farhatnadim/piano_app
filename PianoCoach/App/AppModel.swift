@@ -398,6 +398,9 @@ final class AppModel {
             piece = existing
         } else {
             var demo = Piece(title: DemoSong.title, videoID: "Ode2JoyDemo")
+            // Saved as a MIDI file, like a song the app learned.
+            demo.sheet = try? store?.importAttachment(data: MIDIFileWriter.data(for: DemoSong.score), fileExtension: "mid",
+                                                      originalName: "\(DemoSong.title).mid")
             demo.difficulty = ChartDifficulty.estimate(DemoSong.chart).level
             demo.songInfo = SongInfo(origin: .video, keyName: "C major", tempoBPM: 100, noteCount: DemoSong.chart.notes.count)
             // A few games already played, so the library shows a level and stars.
@@ -421,7 +424,6 @@ final class AppModel {
             }
             #endif
             self.openPiece(piece)
-            self.game.load(chart: DemoSong.chart, progress: piece.game)
             self.game.display = scene.contains("notes") ? .notes : .keys
             guard !scene.contains("start") else { return }
             try? await Task.sleep(nanoseconds: 1_000_000_000)

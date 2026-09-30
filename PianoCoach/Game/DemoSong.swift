@@ -39,4 +39,18 @@ enum DemoSong {
         return NoteChart(title: title, notes: notes, beatsPerMinute: 100,
                          barLines: (0..<16).map { Double($0 * 4) }, source: .score)
     }
+
+    /// The same song as a score, e.g. to save it as a MIDI file.
+    static var score: Score {
+        let chart = self.chart
+        let measures = (0..<16).map {
+            ScoreMeasure(index: $0, sourceIndex: $0, number: String($0 + 1), startBeat: Double($0 * 4), lengthBeats: 4,
+                         timeSignature: .common)
+        }
+        let notes = chart.notes.map {
+            ScoreNote(midi: $0.midi, beat: $0.time, durationBeats: $0.duration, hand: $0.hand,
+                      measureIndex: min(15, Int($0.time / 4)))
+        }
+        return Score(title: title, measures: measures, events: [], initialTempoBPM: chart.beatsPerMinute, notes: notes)
+    }
 }
