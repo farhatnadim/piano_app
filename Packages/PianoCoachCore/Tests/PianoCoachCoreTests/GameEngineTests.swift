@@ -65,6 +65,25 @@ final class GameEngineTests: XCTestCase {
         XCTAssertGreaterThan(engine.position, chart.notes[0].time)
     }
 
+    func testLearnModeTimeSpentPausedDoesNotCountAsWaiting() {
+        var config = GameConfiguration()
+        config.mode = .learn
+        config.adaptiveSpeed = false
+        let engine = GameEngine(chart: chart, configuration: config)
+        engine.start(at: 0)
+        var clock = 0.0
+        while !engine.isWaiting { clock += 1.0 / 60; engine.update(to: clock) }
+        // Paused a moment after the chord reached the line, then resumed a minute later.
+        engine.pause(at: clock + 0.1)
+        clock += 60
+        engine.start(at: clock)
+        clock += 0.05
+        engine.update(to: clock)
+        engine.handle(midiOnset([48, 64], at: clock), at: clock)
+        XCTAssertEqual(engine.statuses[0], .hit(.perfect))
+        XCTAssertEqual(engine.statuses[1], .hit(.perfect))
+    }
+
     func testPlayModePerfectPlayerGetsThreeStars() {
         var config = GameConfiguration()
         config.mode = .play

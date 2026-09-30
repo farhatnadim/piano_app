@@ -18,13 +18,17 @@ public enum MIDIFileWriter {
     /// number of sharps or flats).
     public static func data(for score: Score, isMinor: Bool = false) -> Data {
         let q = Double(ticksPerQuarter)
-        func tick(_ beat: Double) -> Int { max(0, Int((beat * q).rounded())) }
+        // Clamped before converting: Int(_:) traps on NaN, infinity and values beyond Int's range.
+        func tick(_ beat: Double) -> Int {
+            let t = (beat * q).rounded()
+            return t.isNaN ? 0 : Int(max(0, min(t, 1e15)))
+        }
 
         var notes: [(on: Int, off: Int, midi: Int, velocity: Int, hand: Hand)] = []
         for n in score.notes {
             let on = tick(n.beat)
             let off = max(on + 1, tick(n.beat + n.durationBeats))
-            let velocity = n.velocity.map { Int(($0 * 127).rounded()) } ?? defaultVelocity
+            let velocity = n.velocity.flatMap { $0.isFinite ? Int((max(0, min(1, $0)) * 127).rounded()) : nil } ?? defaultVelocity
             notes.append((on, off, max(0, min(127, n.midi)), max(1, min(127, velocity)), n.hand))
         }
         let lastMeasureEnd = score.measures.last.map { tick($0.endBeat) } ?? 0
@@ -42,7 +46,7 @@ public enum MIDIFileWriter {
         if score.measures.isEmpty { conductor.meta(0x58, [4, 2, 24, 8], at: 0) }
         let fifths = Int8(max(-7, min(7, score.keyFifths)))
         conductor.meta(0x59, [UInt8(bitPattern: fifths), isMinor ? 1 : 0], at: 0)
-        if let bpm = score.initialTempoBPM, bpm > 0 {
+        if let bpm = score.initialTempoBPM, bpm > 0, bpm.isFinite {
             let micros = max(1, min(0xFF_FFFF, Int((60_000_000 / bpm).rounded())))
             conductor.meta(0x51, [UInt8(micros >> 16), UInt8(micros >> 8 & 0xFF), UInt8(micros & 0xFF)], at: 0)
         }

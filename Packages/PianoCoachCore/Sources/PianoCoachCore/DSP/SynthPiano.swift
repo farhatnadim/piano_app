@@ -37,11 +37,13 @@ public enum SynthPiano {
         let release = 0.08
         for note in notes {
             let f0 = Pitch.frequency(midi: note.midi)
-            let startIndex = Int(note.start * sampleRate)
-            guard startIndex < count else { continue }
+            // A note may start before the buffer (it is heard from its middle); non-finite times are skipped.
+            let startPosition = (note.start * sampleRate).rounded(.towardZero)
+            guard startPosition.isFinite, note.duration.isFinite, startPosition < Double(count) else { continue }
+            let startIndex = Int(max(startPosition, -1e12))
             let decayTime = 2.5 * pow(261.6 / f0, 0.45)       // low notes ring longer
-            let endTime = note.duration + release
-            let endIndex = min(count, startIndex + Int(endTime * sampleRate))
+            let endSample = Double(startIndex) + (max(0, note.duration) + release) * sampleRate
+            let endIndex = Int(max(0, min(Double(count), endSample)))
             let amp = 0.18 * note.velocity
             var partials: [(freq: Double, gain: Float, decay: Double)] = []
             for h in 1...10 {
@@ -50,7 +52,7 @@ public enum SynthPiano {
                 if f > sampleRate * 0.45 || f > 8000 { break }
                 partials.append((f, Float(1 / pow(hd, 1.1)), decayTime / (1 + 0.35 * (hd - 1))))
             }
-            for i in startIndex..<endIndex {
+            for i in min(max(0, startIndex), endIndex)..<endIndex {
                 let t = Double(i - startIndex) / sampleRate
                 let attack = min(1, t / 0.004)
                 let damper = t > note.duration ? max(0, 1 - (t - note.duration) / release) : 1

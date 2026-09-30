@@ -71,7 +71,8 @@ final class NoteInput {
         notice = nil
         let gen = generation
         Task { [weak self] in
-            guard let self else { return }
+            // Stopped before this ran: don't start anything.
+            guard let self, gen == self.generation else { return }
             switch self.noteSource {
             case .microphone:
                 guard await Permissions.requestMicrophone() else {
@@ -116,6 +117,8 @@ final class NoteInput {
         midi.onNoteOff = nil
         midi.stop()
         midiFlushTask?.cancel()
+        // Drop a half-collected chord, so it isn't reported with the first note of the next session.
+        _ = grouper.flushAll()
         isListening = false
         inputLevel = 0
     }

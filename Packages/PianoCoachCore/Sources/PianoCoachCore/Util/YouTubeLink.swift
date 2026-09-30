@@ -216,7 +216,8 @@ public enum YouTubeLink {
         if s.contains(":") {
             let parts = s.split(separator: ":", omittingEmptySubsequences: false)
             guard parts.count <= 3, parts.allSatisfy(isNumber) else { return nil }
-            return parts.reduce(0.0) { $0 * 60 + (Double($1) ?? 0) }
+            let total = parts.reduce(0.0) { $0 * 60 + (Double($1) ?? 0) }
+            return total.isFinite ? total : nil
         }
         var total = 0.0
         var number = Substring("")
@@ -247,6 +248,6 @@ public enum YouTubeLink {
         } else if !sawUnit {
             return nil
         }
-        return total
+        return total.isFinite ? total : nil
     }
 }

@@ -32,6 +32,8 @@ public final class GameEngine {
     private var nextChord = 0
     private var lastClock: Double?
     private var waitStartClock: Double?
+    /// When the running game was last paused (so time spent paused doesn't count as waiting).
+    private var pausedAtClock: Double?
     private var history: [(clock: Double, position: Double)] = []
     private var adaptive: AdaptiveSpeedController
     private var pendingEvents: [GameEvent] = []
@@ -59,6 +61,10 @@ public final class GameEngine {
 
     public func start(at clock: Double) {
         guard !isFinished else { return }
+        if let paused = pausedAtClock, let waitStart = waitStartClock {
+            waitStartClock = waitStart + max(0, clock - paused)
+        }
+        pausedAtClock = nil
         isRunning = true
         lastClock = clock
         record(clock)
@@ -66,6 +72,7 @@ public final class GameEngine {
 
     public func pause(at clock: Double) {
         update(to: clock)
+        if isRunning { pausedAtClock = clock }
         isRunning = false
         lastClock = nil
     }

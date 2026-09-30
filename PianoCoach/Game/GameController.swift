@@ -118,6 +118,7 @@ final class GameController {
     @ObservationIgnored private var demoStarted: Set<Int> = []
     @ObservationIgnored private var demoEnded: Set<Int> = []
     @ObservationIgnored private var accompanied: Set<Int> = []
+    @ObservationIgnored private var accompanimentEnded: Set<Int> = []
 
     init(input: NoteInput, sound: GameSoundPlayer) {
         self.input = input
@@ -181,6 +182,7 @@ final class GameController {
         result = nil
         levelChange = nil
         accompanied = []
+        accompanimentEnded = []
         attachInput()
         startTimer()
         if accompanyOtherHand && hands != .both { try? sound.start() }
@@ -208,6 +210,9 @@ final class GameController {
 
     func resume() {
         guard phase == .paused, let engine else { return }
+        // The app may have stopped the listener and the piano meanwhile (e.g. it went to the background).
+        if listensForNotes && !input.isListening { input.startListening() }
+        if accompanyOtherHand && hands != .both { try? sound.start() }
         phase = .playing
         engine.start(at: MonotonicClock.now())
     }
@@ -508,7 +513,11 @@ final class GameController {
                 accompanied.insert(note.id)
                 if position - note.time < 0.5 { sound.noteOn(note.midi, velocity: Float(note.velocity ?? 0.6) * 0.8) }
             }
-            if accompanied.contains(note.id) && note.end <= position { sound.noteOff(note.midi) }
+            // Once only: a later note on the same key would otherwise be cut off every frame.
+            if accompanied.contains(note.id) && !accompanimentEnded.contains(note.id) && note.end <= position {
+                accompanimentEnded.insert(note.id)
+                sound.noteOff(note.midi)
+            }
         }
     }
 

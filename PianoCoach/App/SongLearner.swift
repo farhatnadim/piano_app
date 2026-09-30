@@ -84,10 +84,10 @@ final class SongLearner {
         phase = .starting
         Task { [weak self] in
             guard let self else { return }
-            let started = await self.startDirectCapture()
+            let started = await self.startDirectCapture(generation: gen)
             guard gen == self.generation else { return }
             if !started {
-                guard await self.startMicrophone() else {
+                guard await self.startMicrophone(generation: gen) else {
                     guard gen == self.generation else { return }
                     self.phase = .failed("I can't hear the video: the microphone is turned off for Piano Coach. "
                                          + "You can allow it in Settings.")
@@ -103,14 +103,22 @@ final class SongLearner {
 
     /// Stops recording and writes down the notes heard so far.
     func finishListening() {
-        guard isListening else { return }
+        guard phase == .listening else {
+            // Still starting: nothing was recorded yet, and the start would otherwise carry on afterwards.
+            if phase == .starting { cancel() }
+            return
+        }
         let gen = generation
         monitorTask?.cancel()
         player.pause()
         let recording = collector.snapshot()
+        // Leave `.listening` now, so a second call (button tap and the video ending) can't transcribe twice.
+        phase = .transcribing(0)
         Task { [weak self] in
-            await self?.stopRecording()
+            // A cancelled session's recorders were already stopped by `cancel`; don't touch a newer one's.
             guard let self, gen == self.generation else { return }
+            await self.stopRecording()
+            guard gen == self.generation else { return }
             guard recording.samples.count > Int(recording.sampleRate * 3) else {
                 self.phase = .failed("I didn't hear enough of the song. Let the video play for a while, then try again.")
                 return
@@ -148,11 +156,16 @@ final class SongLearner {
         player.play()
     }
 
-    private func startDirectCapture() async -> Bool {
+    private func startDirectCapture(generation gen: Int) async -> Bool {
         let collector = collector
         let capture = AppAudioCapture { samples, rate in collector.append(samples, sampleRate: rate) }
         do {
             try await capture.start()
+            // Cancelled while the system was asking: don't leave this recording running.
+            guard gen == generation else {
+                await capture.stop()
+                return false
+            }
             self.capture = capture
             return true
         } catch {
@@ -160,8 +173,9 @@ final class SongLearner {
         }
     }
 
-    private func startMicrophone() async -> Bool {
-        guard await Permissions.requestMicrophone() else { return false }
+    private func startMicrophone(generation gen: Int) async -> Bool {
+        // Cancelled while asking for permission: don't feed a newer session (or none) from this one.
+        guard await Permissions.requestMicrophone(), gen == generation else { return false }
         let collector = collector
         audio.setChunkHandler { chunk in collector.append(chunk.samples, sampleRate: chunk.sampleRate) }
         do {
@@ -179,7 +193,11 @@ final class SongLearner {
             self.capture = nil
             await capture.stop()
         }
-        if usesMicrophone { audio.setChunkHandler(nil) }
+        if usesMicrophone {
+            audio.setChunkHandler(nil)
+            // Done with the microphone: a later `cancel` mustn't clear the note input's handler.
+            usesMicrophone = false
+        }
     }
 
     /// Follows the recording and the video: ends when the video does, and switches to the microphone
@@ -223,7 +241,7 @@ final class SongLearner {
         collector.reset()
         playingSince = nil
         sawPlayback = false
-        guard await startMicrophone(), gen == generation else {
+        guard await startMicrophone(generation: gen), gen == generation else {
             if gen == generation {
                 phase = .failed("I can't hear the video. Turn the sound up, or allow the microphone in Settings.")
             }

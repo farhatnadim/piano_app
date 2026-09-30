@@ -42,6 +42,12 @@ final class VoiceCommandListener {
     @ObservationIgnored private var usingOnDevice = false
     @ObservationIgnored private var allowOnDevice = true
     @ObservationIgnored private var consecutiveFailures = 0
+    /// Whether an on-device task has reported anything since `start()`. Until it has, on-device
+    /// recognition is on probation: a missing or broken speech model fails every task (often with an error
+    /// that otherwise means "no speech") or never reports at all, so we switch to Apple's server instead.
+    @ObservationIgnored private var onDeviceProven = false
+    @ObservationIgnored private var onDeviceFailures = 0
+    @ObservationIgnored private var watchdogTask: Task<Void, Never>?
     @ObservationIgnored private var wantsRunning = false
     @ObservationIgnored private var isStarting = false
 
@@ -68,6 +74,8 @@ final class VoiceCommandListener {
         "play", "show", "stop", "start", "go", "repeat", "turn", "no", "reduce", "increase", "right", "left",
         "to", "the", "for", "this", "it", "me", "more", "off", "on", "just", "only",
     ]
+    /// Seconds of microphone audio an unproven on-device model gets before the server is tried instead.
+    private static let onDeviceProbation = 20.0
     private static let unavailableMessage =
         "Speech recognition is unavailable right now (it may need an internet connection). Voice commands will come back by themselves."
 
@@ -115,8 +123,11 @@ final class VoiceCommandListener {
         audio.setBufferHandler(Self.makeBufferHandler(feed: feed))
         isRunning = true
         allowOnDevice = true
+        onDeviceProven = false
+        onDeviceFailures = 0
         consecutiveFailures = 0
         beginTask()
+        startOnDeviceWatchdog()
     }
 
     /// Stops recognising. The microphone keeps running for the game; the app stops it when idle.
@@ -125,6 +136,8 @@ final class VoiceCommandListener {
         audio.setBufferHandler(nil)
         restartTask?.cancel()
         restartTask = nil
+        watchdogTask?.cancel()
+        watchdogTask = nil
         endTask()
         captionTask?.cancel()
         captionTask = nil
@@ -210,6 +223,31 @@ final class VoiceCommandListener {
 
     // MARK: - Events
 
+    /// Falls back to server recognition when on-device tasks have been fed audio for a while without ever
+    /// reporting anything (a working model reports partial results as soon as someone speaks).
+    private func startOnDeviceWatchdog() {
+        watchdogTask?.cancel()
+        let feed = self.feed
+        let startBuffers = feed.appendedBuffers
+        watchdogTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.onDeviceProbation * 1_000_000_000))
+            guard let self, !Task.isCancelled, self.isRunning, self.usingOnDevice, !self.onDeviceProven,
+                  feed.appendedBuffers - startBuffers > Int(Self.onDeviceProbation * 5) else { return }
+            self.fallBackToServer()
+        }
+    }
+
+    /// Stops using on-device recognition until the next `start()` and starts a server task now.
+    private func fallBackToServer() {
+        guard allowOnDevice else { return }
+        allowOnDevice = false
+        onDeviceFailures = 0
+        consecutiveFailures = 0
+        watchdogTask?.cancel()
+        watchdogTask = nil
+        restartRecognition(after: 0)
+    }
+
     private func receive(_ event: RecognitionEvent) {
         guard isRunning else { return }
         switch event {
@@ -226,6 +264,12 @@ final class VoiceCommandListener {
 
     private func heard(_ text: String, isFinal: Bool) {
         consecutiveFailures = 0
+        if usingOnDevice && !onDeviceProven {
+            onDeviceProven = true
+            onDeviceFailures = 0
+            watchdogTask?.cancel()
+            watchdogTask = nil
+        }
         if errorMessage != nil { errorMessage = nil }
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let command = words.isEmpty ? nil : VoiceCommandParser(requireWakeWord: requireWakeWord || (requireWakeWordWhen?() ?? false)).parse(words)
@@ -277,13 +321,23 @@ final class VoiceCommandListener {
             return
         }
         let rapid = MonotonicClock.now() - taskStartedAt < 2
-        consecutiveFailures = rapid ? consecutiveFailures + 1 : 0
-        if rapid && !Self.isQuietError(domain: domain, code: code) {
-            // E.g. a missing on-device model fails every task at once: let Apple's server try instead.
-            if usingOnDevice && consecutiveFailures >= 2 { allowOnDevice = false }
-            if consecutiveFailures >= 3 {
-                errorMessage = "Voice commands aren't working right now (\(message)). Still trying…"
+        let quiet = Self.isQuietError(domain: domain, code: code)
+        // Failures of replaced tasks (our own cancellations) never get here: they carry an old generation.
+        // A missing or broken on-device model fails every task at once, often with a code that otherwise
+        // means "no speech" or "cancelled" (e.g. kAFAssistantErrorDomain 1101), so any rapid or non-quiet
+        // failure of an on-device model that hasn't reported anything yet counts against it. After two,
+        // and Apple's server takes over.
+        if usingOnDevice && !onDeviceProven && (rapid || !quiet) {
+            onDeviceFailures += 1
+            if onDeviceFailures >= 2 {
+                fallBackToServer()
+                return
             }
+        }
+        consecutiveFailures = rapid ? consecutiveFailures + 1 : 0
+        // Rapid failures in a row mean recognition isn't working, whatever the code says.
+        if rapid && consecutiveFailures >= (quiet ? 4 : 3) {
+            errorMessage = "Voice commands aren't working right now (\(message)). Still trying…"
         }
         let delay = consecutiveFailures == 0 ? 0.1 : min(8, 0.25 * pow(2, Double(consecutiveFailures)))
         restartRecognition(after: delay)
@@ -430,6 +484,10 @@ private final class RequestFeed: @unchecked Sendable {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var onFormatChange: (@Sendable () -> Void)?
     private var sampleRate: Double = 0
+    private var appended = 0
+
+    /// Buffers handed to requests so far.
+    var appendedBuffers: Int { lock.withLock { appended } }
 
     /// Swaps in a new request (or none) and returns the previous one. No buffer reaches the previous
     /// request after this returns.
@@ -461,6 +519,7 @@ private final class RequestFeed: @unchecked Sendable {
                 return report
             }
             current.append(mono)
+            appended += 1
             return nil
         }
         formatChanged?()

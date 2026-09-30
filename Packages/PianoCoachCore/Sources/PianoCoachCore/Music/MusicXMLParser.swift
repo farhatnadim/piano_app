@@ -125,7 +125,8 @@ public enum MusicXMLParser {
         var attacks: [(beat: Double, measure: Int, note: NoteRecord)] = []
         var notes: [ScoreNote] = []
         // Latest note per (part, staff, pitch), for extending it with tied continuations.
-        var openNotes: [Int: Int] = [:]
+        struct OpenKey: Hashable { var part: Int, staff: Int, midi: Int }
+        var openNotes: [OpenKey: Int] = [:]
         let pitchedParts = Set(source.flatMap { $0.notes.map(\.part) })
         func hand(_ n: NoteRecord) -> Hand {
             if n.part < stavesPerPart.count, stavesPerPart[n.part] >= 2 { return n.staff == 1 ? .right : .left }
@@ -138,7 +139,7 @@ public enum MusicXMLParser {
                                          lengthBeats: lengths[s], timeSignature: signatures[s]))
             for note in source[s].notes {
                 let beat = start + note.onset
-                let key = (note.part * 16 + note.staff) * 128 + note.midi
+                let key = OpenKey(part: note.part, staff: note.staff, midi: note.midi)
                 if note.isContinuation {
                     if let i = openNotes[key], abs(notes[i].beat + notes[i].durationBeats - beat) < 1e-3 {
                         notes[i].durationBeats += note.duration
@@ -275,7 +276,7 @@ public enum MusicXMLParser {
             for child in measure.children {
                 switch child.name {
                 case "attributes":
-                    if let d = child.child("divisions").flatMap({ Double($0.trimmedText) }), d > 0 {
+                    if let d = child.child("divisions").flatMap({ Double($0.trimmedText) }), d >= 1e-6, d.isFinite {
                         base = position()
                         offset = 0
                         divisions = d
@@ -362,15 +363,17 @@ public enum MusicXMLParser {
         return result.isEmpty ? nil : result
     }
 
+    /// The `<duration>` in divisions; 0 when missing, negative, non-finite or absurdly large.
     static func duration(_ node: LiteXMLElement) -> Double {
-        node.child("duration").flatMap { Double($0.trimmedText) } ?? 0
+        guard let d = node.child("duration").flatMap({ Double($0.trimmedText) }), d.isFinite, d >= 0, d <= 1e9 else { return 0 }
+        return d
     }
 
     static func midiNumber(_ pitch: LiteXMLElement) -> Int? {
         guard let step = pitch.child("step")?.trimmedText,
-              let octave = pitch.child("octave").flatMap({ Int($0.trimmedText) }) else { return nil }
+              let octave = pitch.child("octave").flatMap({ Int($0.trimmedText) }), (-1...10).contains(octave) else { return nil }
         let alter = pitch.child("alter").flatMap { Double($0.trimmedText) } ?? 0
-        guard let midi = Pitch.midiNumber(step: step, alter: Int(alter.rounded()), octave: octave),
+        guard alter.isFinite, abs(alter) <= 12, let midi = Pitch.midiNumber(step: step, alter: Int(alter.rounded()), octave: octave),
               (0...127).contains(midi) else { return nil }
         return midi
     }
@@ -386,16 +389,24 @@ public enum MusicXMLParser {
     /// `<time>` -> signature. Additive beats ("3+2") are summed; composite signatures
     /// (several beats/beat-type pairs) are expressed over their least common beat type.
     static func timeSignature(_ time: LiteXMLElement) -> TimeSignature? {
+        // Values outside these ranges are nonsense (and could overflow the arithmetic below).
+        let beatRange = 1...1000, typeRange = 1...1024
         let beats = time.children(named: "beats").map { node -> Int in
-            node.trimmedText.split(separator: "+").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }.reduce(0, +)
+            let parts = node.trimmedText.split(separator: "+").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            guard parts.allSatisfy(beatRange.contains) else { return 0 }
+            return parts.prefix(beatRange.upperBound).reduce(0, +)
         }
         let types = time.children(named: "beat-type").map { node -> Int in
             Int(node.trimmedText.split(separator: "+").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? "") ?? 0
         }
-        let pairs = zip(beats, types).filter { $0.0 > 0 && $0.1 > 0 }
+        let pairs = zip(beats, types).filter { $0.0 > 0 && typeRange.contains($0.1) }
         guard let first = pairs.first else { return nil }
         if pairs.count == 1 { return TimeSignature(beats: first.0, beatType: first.1) }
-        let common = pairs.map(\.1).reduce(1) { lcm($0, $1) }
+        var common = 1
+        for type in pairs.map(\.1) {
+            common = lcm(common, type)
+            guard common <= 1 << 20 else { return nil }
+        }
         return TimeSignature(beats: pairs.reduce(0) { $0 + $1.0 * (common / $1.1) }, beatType: common)
     }
 
@@ -443,7 +454,8 @@ public enum MusicXMLParser {
               let perMinuteText = metronome.child("per-minute")?.trimmedText,
               let perMinute = leadingNumber(in: perMinuteText), perMinute > 0 else { return nil }
         let dots = metronome.children(named: "beat-unit-dot").count
-        return perMinute * unit * (2 - pow(0.5, Double(dots)))
+        let tempo = perMinute * unit * (2 - pow(0.5, Double(dots)))
+        return tempo.isFinite ? tempo : nil
     }
 
     /// First decimal number in a string ("c. 72" -> 72, "60-66" -> 60).

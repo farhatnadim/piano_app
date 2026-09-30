@@ -225,6 +225,17 @@ final class VoiceCommandParserTests: XCTestCase {
         }
     }
 
+    func testSpeedWithToAtOf() {
+        assertCommand("set the speed to 60", .setSpeed(0.6))
+        assertCommand("change speed to seventy five", .setSpeed(0.75))
+        assertCommand("speed at 50 percent", .setSpeed(0.5))
+        assertCommand("play at a speed of 80", .setSpeed(0.8))
+        assertCommand("reduce the speed to fifty percent", .setSpeed(0.5))
+        assertCommand("speed to one", .setSpeed(1.0))
+        // Without a number it is still just a speed change.
+        assertCommand("reduce the speed to", .slower)
+    }
+
     func testParserIsValueTypeAndConfigurable() {
         var p = VoiceCommandParser()
         XCTAssertFalse(p.requireWakeWord)

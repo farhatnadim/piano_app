@@ -241,6 +241,7 @@ final class AppModel {
         learner.cancel()
         player.pause()
         isRelearning = false
+        stopMicrophoneIfIdle()
     }
 
     /// Listens to the open song's video and writes down its notes.
@@ -256,6 +257,8 @@ final class AppModel {
         guard let piece = openPiece else { return }
         game.stop()
         input.stopListening()
+        // Show the learn screen (and its progress) even when the song already has notes.
+        isRelearning = game.fullChart != nil
         learner.learn(fromAudioFile: url, title: piece.title, pieceID: piece.id)
     }
 
@@ -276,6 +279,8 @@ final class AppModel {
             return
         }
         guard openPieceID == pieceID else { return }
+        // The microphone may have listened to the video; leave it on only for what still needs it.
+        stopMicrophoneIfIdle()
         player.pause()
         isRelearning = false
         loadNotes(for: piece)
@@ -337,7 +342,11 @@ final class AppModel {
             showToast(command.confirmation)
             return
         }
-        guard !needsLearning else { return }
+        guard !needsLearning else {
+            // Say why nothing happens rather than ignoring the child.
+            showToast("The game starts once the song's notes are ready")
+            return
+        }
         var confirmation = command.confirmation
         switch command {
         case .play: game.play()

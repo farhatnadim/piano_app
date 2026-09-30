@@ -122,15 +122,17 @@ public struct VoiceCommandParser: Sendable {
         return matches
     }
 
-    /// "speed 75", "speed fifty percent", "75 percent", "60 percent speed", "speed 0.5".
+    /// "speed 75", "speed fifty percent", "75 percent", "60 percent speed", "speed 0.5", "set the speed to 60".
     private static func speedMatches(in tokens: [String], priority: Int) -> [Match] {
         var matches: [Match] = []
         let n = tokens.count
 
         // "speed N": N <= 2 is a multiplier ("speed one" = 1x), larger N is a percentage.
         for i in 0..<n where tokens[i] == "speed" && i + 1 < n {
-            guard let number = numberValue(tokens, at: i + 1) else { continue }
-            var end = i + 1 + number.consumed
+            // "speed to 60", "speed at 50 percent", "a speed of 75".
+            let first = ["to", "at", "of"].contains(tokens[i + 1]) ? i + 2 : i + 1
+            guard let number = numberValue(tokens, at: first) else { continue }
+            var end = first + number.consumed
             var rate = number.value <= 2 ? number.value : number.value / 100
             let pl = percentLength(tokens, at: end)
             if pl > 0 {

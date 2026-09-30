@@ -54,7 +54,7 @@ public struct NoteChart: Codable, Hashable, Sendable {
     public init(title: String, notes: [ChartNote], beatsPerMinute: Double, barLines: [Double] = [],
                 source: ChartSource, keyFifths: Int = 0, videoTimeOfBeatZero: Double? = nil) {
         self.title = title
-        self.beatsPerMinute = beatsPerMinute > 0 ? beatsPerMinute : 60
+        self.beatsPerMinute = beatsPerMinute > 0 && beatsPerMinute.isFinite ? beatsPerMinute : 60
         self.barLines = barLines
         self.source = source
         self.keyFifths = keyFifths

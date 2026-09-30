@@ -79,7 +79,7 @@ public enum TempoEstimator {
     /// The beat of `notes` at a known tempo (for when the tempo is given rather than guessed).
     public static func beat(_ notes: [TranscribedNote], bpm: Double, options: Options = Options()) -> TempoEstimate? {
         let onsets = makeOnsets(notes, window: options.chordWindow)
-        guard let first = onsets.first, bpm > 0 else { return nil }
+        guard let first = onsets.first, bpm > 0, bpm.isFinite else { return nil }
         let period = 60 / bpm
         let fit = gridFit(onsets[...], period: period, sigma: options.timingTolerance)
         return TempoEstimate(bpm: bpm, beatTime: nearestBeat(to: first.time, (period, fit.phaseTime)),

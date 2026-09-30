@@ -27,6 +27,9 @@ public enum MIDIFileError: Error, Equatable {
 /// Hands come from track names that say so ("Right hand", "LH", "Treble", ...), then from the usual
 /// layout of two note tracks (right hand first), and otherwise from a split at middle C.
 public enum MIDIFileParser {
+    /// Longest song accepted, in quarter notes (well over two hours at 120 BPM).
+    static let maxQuarterNotes = 20_000.0
+
     public static func parse(data: Data) throws -> Score {
         let bytes = [UInt8](data)
         var p = try headerStart(bytes)
@@ -84,6 +87,10 @@ public enum MIDIFileParser {
 
         let lastOnset = notes.map(\.tick).max() ?? 0
         let endTick = notes.map { $0.tick + $0.duration }.max() ?? 0
+        // Delta times of up to 2^28 ticks let a tiny file claim billions of beats (and as many measures).
+        guard Double(endTick) / Double(ppq) <= maxQuarterNotes else {
+            throw MIDIFileError.invalidData("song longer than \(Int(maxQuarterNotes)) quarter notes")
+        }
         let measures = buildMeasures(signatures: signatures, ppq: ppq, lastOnset: lastOnset, endTick: endTick)
 
         // Group attacks.
@@ -250,7 +257,8 @@ public enum MIDIFileParser {
                     track.tempos.append((tick, Int(d[0]) << 16 | Int(d[1]) << 8 | Int(d[2])))
                 case 0x58 where data.count >= 2:
                     let d = Array(data)
-                    if d[0] > 0, d[1] < 16 {
+                    // Denominators beyond 1/64 are nonsense and would make measures absurdly short.
+                    if d[0] > 0, d[1] <= 6 {
                         track.timeSignatures.append((tick, TimeSignature(beats: Int(d[0]), beatType: 1 << Int(d[1]))))
                     }
                 case 0x59 where data.count >= 2:
