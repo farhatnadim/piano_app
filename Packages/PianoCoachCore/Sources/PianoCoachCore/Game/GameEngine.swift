@@ -152,6 +152,17 @@ public final class GameEngine {
         return chords[nextChord].filter { statuses[$0] == .pending }.map { chart.notes[$0] }
     }
 
+    /// Notes still to play that fall within `beats` of the playhead (and any already due), in chart order.
+    public func pendingNotes(within beats: Double) -> [ChartNote] {
+        var result: [ChartNote] = []
+        var c = nextChord
+        while c < chords.count, chartTime(ofChord: c) <= position + beats {
+            for note in chords[c] where statuses[note] == .pending { result.append(chart.notes[note]) }
+            c += 1
+        }
+        return result
+    }
+
     // MARK: - Judging
 
     /// Judges something the player played at `clock`.
@@ -234,7 +245,7 @@ public final class GameEngine {
         }
         statuses[note] = .hit(judgement)
         if judgement == .perfect { stats.perfect += 1 } else { stats.good += 1 }
-        pendingEvents.append(.hit(noteID: note, midi: n.midi, judgement: judgement))
+        pendingEvents.append(.hit(noteID: note, midi: n.midi, judgement: judgement, timingError: timingError))
 
         // A chord counts once all of its notes are played.
         guard chords[chord].allSatisfy({ statuses[$0].isDone }) else { return }

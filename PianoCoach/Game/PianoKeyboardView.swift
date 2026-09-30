@@ -1,13 +1,16 @@
 import PianoCoachCore
 import SwiftUI
 
-/// A piano keyboard drawn in one Canvas, with key glows (held, right, wrong), a gentle hint on the keys to
-/// play next, letter names and a mark on middle C. It shows the part of the 88 keys in `layout`'s window
+/// A piano keyboard drawn in one Canvas, with key glows (right, early, late, wrong), green hints on the keys
+/// to play next (flashing as their moment comes, steady once it's there), letter names and a mark on middle C. It shows the part of the 88 keys in `layout`'s window
 /// (all of them, or the part the song is played on). Tapping or sliding across it plays keys.
 struct PianoKeyboardView: View {
     let layout: KeyboardLayout
     var glows: [Int: KeyGlow] = [:]
-    var hints: Set<Int> = []
+    /// Keys to play soon: 0 = still a moment away (flashing), 1 = due now (steady).
+    var hints: [Int: Double] = [:]
+    /// The clock the flashing follows (any steadily increasing seconds).
+    var now: Double = 0
     var showLetters = true
     /// Called with the key's MIDI number when a key is touched (nil: the keyboard only shows).
     var onPress: ((Int) -> Void)?
@@ -16,7 +19,7 @@ struct PianoKeyboardView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        let renderer = KeyboardRenderer(layout: layout, glows: glows, hints: hints, showLetters: showLetters,
+        let renderer = KeyboardRenderer(layout: layout, glows: glows, hints: hints, now: now, showLetters: showLetters,
                                         isDark: colorScheme == .dark)
         GeometryReader { geo in
             Canvas { context, size in
@@ -49,9 +52,19 @@ struct PianoKeyboardView: View {
 struct KeyboardRenderer {
     let layout: KeyboardLayout
     let glows: [Int: KeyGlow]
-    let hints: Set<Int>
+    let hints: [Int: Double]
+    let now: Double
     let showLetters: Bool
     let isDark: Bool
+
+    /// How strongly to show a hinted key right now: steady when due, flashing (about 3 times a second)
+    /// while its moment approaches.
+    private func hintLevel(_ midi: Int) -> Double? {
+        guard let closeness = hints[midi] else { return nil }
+        if closeness >= 0.999 { return 1 }
+        let flash = (now * 3).truncatingRemainder(dividingBy: 1) < 0.5 ? 1.0 : 0.25
+        return flash * (0.5 + 0.5 * closeness)
+    }
 
     /// Narrowest white key that gets its letter, and the narrowest where C keys also get their octave ("C4").
     static let letterMinimumWidth: CGFloat = 14
@@ -84,10 +97,10 @@ struct KeyboardRenderer {
             context.fill(key, with: .color(whiteFill))
             if let glow {
                 context.fill(key, with: .color(GameColors.color(for: glow).opacity(0.85)))
-            } else if hints.contains(midi) {
-                context.fill(key, with: .color(GameColors.hint.opacity(0.28)))
+            } else if let level = hintLevel(midi) {
+                context.fill(key, with: .color(GameColors.hint.opacity(0.15 + 0.5 * level)))
                 context.stroke(Path(roundedRect: rect.insetBy(dx: 1.5, dy: 1.5), cornerRadius: radius, style: .continuous),
-                               with: .color(GameColors.hint), lineWidth: 3)
+                               with: .color(GameColors.hint.opacity(0.4 + 0.6 * level)), lineWidth: 3)
             }
 
             var markerY = height - max(10, white * 0.3)
@@ -111,8 +124,8 @@ struct KeyboardRenderer {
                 let dot = min(10, max(5, white * 0.18))
                 context.fill(Path(ellipseIn: CGRect(x: span.midX - dot / 2, y: markerY - dot / 2, width: dot, height: dot)),
                              with: .color(glow == nil ? Color.accentColor : .white))
-            } else if hints.contains(midi), glow == nil {
-                let dot = min(12, max(6, white * 0.22))
+            } else if let level = hintLevel(midi), glow == nil {
+                let dot = min(12, max(6, white * 0.22)) * (0.7 + 0.3 * level)
                 context.fill(Path(ellipseIn: CGRect(x: span.midX - dot / 2, y: markerY - dot / 2, width: dot, height: dot)),
                              with: .color(GameColors.hint))
             }
@@ -139,9 +152,10 @@ struct KeyboardRenderer {
                     context.fill(Path(roundedRect: lip, cornerRadius: 1.5),
                                  with: .color(Color(white: 1, opacity: 0.12)))
                 }
-                if hints.contains(midi) {
+                if let level = hintLevel(midi) {
+                    context.fill(key, with: .color(GameColors.hint.opacity(0.2 + 0.5 * level)))
                     context.stroke(Path(roundedRect: rect.insetBy(dx: 1.5, dy: 1.5), cornerRadius: r, style: .continuous),
-                                   with: .color(GameColors.hint), lineWidth: 3)
+                                   with: .color(GameColors.hint.opacity(0.4 + 0.6 * level)), lineWidth: 3)
                     let dot = min(10, max(5, span.width * 0.35))
                     context.fill(Path(ellipseIn: CGRect(x: span.midX - dot / 2, y: blackHeight - dot - 10,
                                                         width: dot, height: dot)),
@@ -162,8 +176,13 @@ enum GameColors {
     static let rightHand = Color(red: 0.16, green: 0.6, blue: 0.96)
     static let leftHand = Color(red: 1, green: 0.56, blue: 0.16)
     static let hit = Color(red: 0.2, green: 0.8, blue: 0.36)
+    static let early = Color(red: 1, green: 0.55, blue: 0.1)
+    static let late = Color(red: 1, green: 0.8, blue: 0.1)
     static let wrong = Color(red: 0.95, green: 0.25, blue: 0.25)
-    static let hint = Color(red: 1, green: 0.8, blue: 0.1)
+    /// The keys to play next: green, like a hit, because that's what pressing them will be.
+    static let hint = hit
+    /// Stars and scores.
+    static let star = Color(red: 1, green: 0.8, blue: 0.1)
 
     static func color(for hand: Hand) -> Color { hand == .right ? rightHand : leftHand }
 
@@ -171,6 +190,8 @@ enum GameColors {
         switch glow {
         case .pressed: return .accentColor
         case .correct: return hit
+        case .early: return early
+        case .late: return late
         case .wrong: return wrong
         }
     }

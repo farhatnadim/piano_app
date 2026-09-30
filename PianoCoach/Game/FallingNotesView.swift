@@ -35,7 +35,7 @@ struct FallingNotesScene {
     let statuses: [NoteStatus]
     let hitTimes: [Int: Double]
     let now: Double
-    let upcomingKeys: Set<Int>
+    let upcomingKeys: [Int: Double]
     let isWaiting: Bool
     let showLetters: Bool
     let isDark: Bool
@@ -66,7 +66,7 @@ struct FallingNotesScene {
         // Learn mode waits at the line: make the keys to play glow.
         if isWaiting {
             let pulse = 0.5 + 0.5 * sin(now * 5)
-            for midi in upcomingKeys {
+            for midi in upcomingKeys.keys {
                 guard let span = layout.span(of: midi, width: size.width) else { continue }
                 let height = min(hitY, 160)
                 context.fill(Path(CGRect(x: span.x, y: hitY - height, width: span.width, height: height)),

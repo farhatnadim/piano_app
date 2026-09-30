@@ -64,7 +64,8 @@ public enum NoteStatus: Equatable, Sendable {
 
 /// Something the UI may want to celebrate or flag.
 public enum GameEvent: Equatable, Sendable {
-    case hit(noteID: Int, midi: Int, judgement: Judgement)
+    /// `timingError` is seconds from the note's time: negative when played early, positive when late.
+    case hit(noteID: Int, midi: Int, judgement: Judgement, timingError: Double)
     case miss(noteID: Int, midi: Int)
     /// A key that wasn't expected (MIDI), or a sound that matched nothing (microphone; `midi` is the best guess or nil).
     case wrongNote(midi: Int?)

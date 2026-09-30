@@ -7,7 +7,7 @@ import SwiftUI
 struct KeyboardMinimap: View {
     let layout: KeyboardLayout
     var glows: [Int: KeyGlow] = [:]
-    var hints: Set<Int> = []
+    var hints: [Int: Double] = [:]
 
     static let height: CGFloat = 18
 
@@ -28,7 +28,7 @@ struct KeyboardMinimap: View {
 struct MinimapRenderer {
     let layout: KeyboardLayout
     let glows: [Int: KeyGlow]
-    let hints: Set<Int>
+    let hints: [Int: Double]
 
     /// How much the mini keys show: not at all with the whole keyboard in view, fully once zoomed in a little.
     var visibility: Double {
@@ -82,15 +82,15 @@ struct MinimapRenderer {
 
     private func color(for midi: Int) -> Color? {
         if let glow = glows[midi] { return GameColors.color(for: glow) }
-        if hints.contains(midi) { return GameColors.hint }
+        if hints[midi] != nil { return GameColors.hint }
         return nil
     }
 }
 
-/// Two small round buttons in the corner of the play area: follow the song (zoomed in on its keys) or show
-/// all 88 keys. The choice is remembered.
+/// Small round buttons in the corner of the play area: the song's keys held still, follow the song (zoomed
+/// in on the keys being played), or all 88 keys. The choice is remembered.
 struct KeyboardZoomPicker: View {
-    @AppStorage(KeyboardZoom.storageKey) private var zoom = KeyboardZoom.all
+    @AppStorage(KeyboardZoom.storageKey) private var zoom = KeyboardZoom.song
 
     var body: some View {
         HStack(spacing: 2) {

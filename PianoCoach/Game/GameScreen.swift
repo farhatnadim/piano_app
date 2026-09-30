@@ -84,14 +84,14 @@ struct GameScreen: View {
 /// The game itself: the HUD, the notes (falling or on the staff) and the keyboard, with the count-in,
 /// pause and results on top. Every size comes from the space available (iPad split view, Stage Manager).
 ///
-/// The keyboard is a real 88-key piano, all of it in view. If the child chooses "Follow the song" instead, a
-/// camera zooms in on the part the song is played on and follows the music (`KeyboardCamera`), with a minimap
-/// of the whole piano above the keys. The falling notes share the keyboard's window, so this view updates every frame.
+/// The keyboard is a real 88-key piano, showing the part from the song's lowest note to its highest, held
+/// still. The child can choose all 88 keys instead, or "Follow the song": a camera that zooms in on the keys
+/// being played and follows the music (`KeyboardCamera`), with a minimap of the whole piano above the keys. The falling notes share the keyboard's window, so this view updates every frame.
 private struct PlayArea: View {
     let game: GameController
     let chart: NoteChart
 
-    @AppStorage(KeyboardZoom.storageKey) private var zoom = KeyboardZoom.all
+    @AppStorage(KeyboardZoom.storageKey) private var zoom = KeyboardZoom.song
     /// The camera for `chart`, built once (it indexes the notes).
     @State private var preparedCamera: KeyboardCamera?
 
@@ -102,12 +102,9 @@ private struct PlayArea: View {
         let secondsPerBeat = chart.secondsPerBeat(atSpeed: game.speed)
         GeometryReader { geo in
             let minimumKeys = Self.minimumWhiteKeys(forWidth: geo.size.width)
-            let layout = zoom == .all
-                ? KeyboardLayout.wholeKeyboard
-                : camera.layout(at: position, secondsPerBeat: secondsPerBeat, minimumWhiteKeys: minimumKeys)
-            let sizingKeys = zoom == .all
-                ? Double(KeyboardLayout.whiteKeyTotal)
-                : max(minimumKeys, camera.songWhiteKeys)
+            let layout = Self.layout(for: zoom, chart: chart, camera: camera, position: position,
+                                     secondsPerBeat: secondsPerBeat, minimumKeys: minimumKeys)
+            let sizingKeys = zoom == .auto ? max(minimumKeys, camera.songWhiteKeys) : layout.visibleWhiteKeys
             VStack(spacing: 0) {
                 if game.phase == .demo {
                     DemoBar(game: game)
@@ -144,6 +141,15 @@ private struct PlayArea: View {
         .onChange(of: chart, initial: true) { preparedCamera = KeyboardCamera(chart: chart) }
     }
 
+    static func layout(for zoom: KeyboardZoom, chart: NoteChart, camera: KeyboardCamera, position: Double,
+                       secondsPerBeat: Double, minimumKeys: Double) -> KeyboardLayout {
+        switch zoom {
+        case .song: return KeyboardZoom.songLayout(for: chart, minimumWhiteKeys: minimumKeys)
+        case .auto: return camera.layout(at: position, secondsPerBeat: secondsPerBeat, minimumWhiteKeys: minimumKeys)
+        case .all: return .wholeKeyboard
+        }
+    }
+
     /// The narrowest window the camera zooms to: two octaves, or more on wide screens rather than giant keys.
     static func minimumWhiteKeys(forWidth width: CGFloat) -> Double {
         max(KeyboardCamera.minimumWhiteKeys, Double(width / 64))
@@ -167,7 +173,8 @@ private struct GameKeyboard: View {
     let layout: KeyboardLayout
 
     var body: some View {
-        PianoKeyboardView(layout: layout, glows: game.keyGlows, hints: game.upcomingKeys, showLetters: game.showLetters,
+        PianoKeyboardView(layout: layout, glows: game.keyGlows, hints: game.upcomingKeys, now: game.frameTime,
+                          showLetters: game.showLetters,
                           onPress: { game.tapKey($0) })
     }
 }

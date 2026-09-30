@@ -501,7 +501,7 @@ final class AppModel {
                 let now = MonotonicClock.now()
                 if let since = waitingSince {
                     if now - since > 0.25 {
-                        for midi in game.upcomingKeys.sorted() { game.tapKey(midi) }
+                        for midi in game.upcomingKeys.filter({ $0.value >= 0.999 }).keys.sorted() { game.tapKey(midi) }
                         waitingSince = nil
                     }
                 } else {

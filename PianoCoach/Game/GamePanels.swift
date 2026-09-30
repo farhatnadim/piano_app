@@ -37,7 +37,7 @@ struct GameHUD: View {
                 Spacer(minLength: 4)
                 HStack(spacing: 4) {
                     Image(systemName: "star.fill")
-                        .foregroundStyle(GameColors.hint)
+                        .foregroundStyle(GameColors.star)
                     Text(verbatim: "\(game.score)")
                         .monospacedDigit()
                         .contentTransition(.numericText())
@@ -637,8 +637,8 @@ struct ResultsPanel: View {
                 let earned = i < result.stars
                 Image(systemName: earned ? "star.fill" : "star")
                     .font(.system(size: 52, weight: .bold))
-                    .foregroundStyle(earned ? GameColors.hint : Color.secondary.opacity(0.4))
-                    .shadow(color: earned ? GameColors.hint.opacity(0.6) : .clear, radius: 10)
+                    .foregroundStyle(earned ? GameColors.star : Color.secondary.opacity(0.4))
+                    .shadow(color: earned ? GameColors.star.opacity(0.6) : .clear, radius: 10)
                     .scaleEffect(appeared ? 1 : 0.2)
                     .opacity(appeared ? 1 : 0)
                     .rotationEffect(.degrees(appeared ? 0 : -60))
@@ -773,7 +773,7 @@ struct StarRow: View {
     let filled: Int
     var size: CGFloat = 16
     var symbol = "star.fill"
-    var color = GameColors.hint
+    var color = GameColors.star
 
     var body: some View {
         HStack(spacing: size * 0.2) {

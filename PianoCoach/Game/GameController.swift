@@ -19,9 +19,13 @@ enum GameDisplay: String, CaseIterable, Identifiable, Codable {
 enum KeyGlow: Equatable {
     /// Played by the "Watch and listen" demo.
     case pressed
-    /// The right note.
+    /// The right note, on time.
     case correct
-    /// A note that wasn't expected.
+    /// The right note, but pressed before its time.
+    case early
+    /// The right note, but pressed after its time.
+    case late
+    /// A note that wasn't expected, or one that was missed altogether.
     case wrong
 }
 
@@ -92,7 +96,11 @@ final class GameController {
     /// Per note, indexed by `ChartNote.id`.
     private(set) var statuses: [NoteStatus] = []
     /// Keys of the next notes to play (a gentle hint on the keyboard).
-    private(set) var upcomingKeys: Set<Int> = []
+    /// Keys to play soon, with how close their moment is: 0 when `hintLeadSeconds` away, 1 when due now
+    /// (the key flashes as it approaches and holds steady once due).
+    private(set) var upcomingKeys: [Int: Double] = [:]
+    /// How long before its time a note's key starts to flash.
+    static let hintLeadSeconds = 1.0
     /// Keys to light, by MIDI number.
     private(set) var keyGlows: [Int: KeyGlow] = [:]
     /// When each note was hit (clock time, by note id), for hit animations.
@@ -240,7 +248,7 @@ final class GameController {
         sound.allNotesOff()
         engine = nil
         isWaiting = false
-        upcomingKeys = []
+        upcomingKeys = [:]
         keyGlows = [:]
         glowUntil = [:]
         cheer = nil
@@ -434,7 +442,7 @@ final class GameController {
             speed = engine.speed
             progress = engine.progress
             isWaiting = engine.isWaiting
-            upcomingKeys = Set(engine.upcomingNotes.map(\.midi))
+            upcomingKeys = Self.hints(for: engine, chart: chart, speed: speed)
             accompany(now: now)
             consumeEvents()
         }
@@ -454,11 +462,13 @@ final class GameController {
         combo = engine.combo
         for event in events {
             switch event {
-            case .hit(let id, let midi, _):
+            case .hit(let id, let midi, let judgement, let timingError):
                 hitTimes[id] = now
-                glow(midi, .correct, for: 0.35)
-            case .miss:
-                break
+                // On time: green. Early: orange. Late (or, in Learn mode, after a long wait): yellow.
+                let verdict: KeyGlow = judgement == .perfect ? .correct : timingError < 0 ? .early : .late
+                glow(midi, verdict, for: 0.35)
+            case .miss(_, let midi):
+                glow(midi, .wrong, for: 0.4)
             case .wrongNote(let midi):
                 if let midi { glow(midi, .wrong, for: 0.4) }
             case .speedChanged(let from, let to):
@@ -486,7 +496,20 @@ final class GameController {
         stopTimer()
         detachInput()
         sound.allNotesOff()
-        upcomingKeys = []
+        upcomingKeys = [:]
+    }
+
+    /// The keys of the notes due within `hintLeadSeconds`, each with how close it is (0...1).
+    private static func hints(for engine: GameEngine, chart: NoteChart?, speed: Double) -> [Int: Double] {
+        guard let chart else { return [:] }
+        let leadBeats = hintLeadSeconds / chart.secondsPerBeat(atSpeed: speed)
+        let position = engine.position
+        var hints: [Int: Double] = [:]
+        for note in engine.pendingNotes(within: leadBeats) {
+            let closeness = leadBeats > 0 ? max(0, min(1, 1 - (note.time - position) / leadBeats)) : 1
+            hints[note.midi] = max(hints[note.midi] ?? 0, closeness)
+        }
+        return hints
     }
 
     /// Plays notes of the hand that isn't practised as the playhead reaches them.

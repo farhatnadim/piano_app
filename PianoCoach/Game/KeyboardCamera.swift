@@ -2,18 +2,48 @@ import Foundation
 import PianoCoachCore
 
 /// How much of the keyboard the game shows: the child's choice, kept in `@AppStorage(KeyboardZoom.storageKey)`.
-/// All 88 keys unless they choose otherwise: a keyboard that zooms and slides is distracting mid-song.
+/// By default the keys from the song's lowest note to its highest, held still: a keyboard that zooms and
+/// slides is distracting mid-song.
 enum KeyboardZoom: String, CaseIterable, Identifiable {
+    /// The keys between the song's lowest and highest notes, held still (the default).
+    case song
     /// Zoom in on the keys the song is played on and follow the music up and down the keyboard.
     case auto
-    /// Always show all 88 keys (the default).
+    /// Always show all 88 keys.
     case all
 
     static let storageKey = "keyboardZoom"
 
     var id: String { rawValue }
-    var displayName: String { self == .auto ? "Follow the song" : "All 88 keys" }
-    var systemImage: String { self == .auto ? "plus.magnifyingglass" : "pianokeys" }
+
+    var displayName: String {
+        switch self {
+        case .song: return "The song's keys"
+        case .auto: return "Follow the song"
+        case .all: return "All 88 keys"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .song: return "arrow.left.and.right.square"
+        case .auto: return "plus.magnifyingglass"
+        case .all: return "pianokeys"
+        }
+    }
+
+    /// The still window from the song's lowest note to its highest, with a couple of keys to spare on each
+    /// side and never narrower than two octaves (or `minimumWhiteKeys`).
+    static func songLayout(for chart: NoteChart, minimumWhiteKeys: Double) -> KeyboardLayout {
+        guard let lowest = chart.notes.map(\.midi).min(), let highest = chart.notes.map(\.midi).max() else {
+            return .wholeKeyboard
+        }
+        let low = KeyboardLayout.extent(of: max(KeyboardLayout.lowestKey, lowest)).lowerBound - KeyboardCamera.padding
+        let high = KeyboardLayout.extent(of: min(KeyboardLayout.highestKey, highest)).upperBound + KeyboardCamera.padding
+        let width = max(minimumWhiteKeys, high - low)
+        // Centre the song's keys when the window is wider than they need.
+        return KeyboardLayout(visibleStart: (low + high) / 2 - width / 2, visibleWhiteKeys: width)
+    }
 }
 
 /// Decides which part of the keyboard is in view while a song plays, like a camera following the music.
