@@ -1,5 +1,8 @@
 import PianoCoachCore
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // MARK: - Heads-up display
 
@@ -219,6 +222,7 @@ struct StartPanel: View {
                         modeTile(.learn, systemImage: "graduationcap.fill", explanation: "The notes wait for you")
                         modeTile(.play, systemImage: "bolt.fill", explanation: "Keep up and score points")
                     }
+                    playsOnPicker
                     buttons
                     options
                     speed
@@ -437,23 +441,49 @@ struct StartPanel: View {
         }
     }
 
+    /// A real piano, or the keys on the screen.
+    private var playsOnPicker: some View {
+        OptionRow(title: "Play on", systemImage: "hand.point.up.left.fill") {
+            Picker("Play on", selection: $game.playsOn) {
+                Text("Piano").tag(PlayInstrument.piano)
+                Text(Self.deviceName).tag(PlayInstrument.screen)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+    }
+
+    private static var deviceName: String {
+        #if os(macOS)
+        return "Mac"
+        #else
+        return UIDevice.current.userInterfaceIdiom == .phone ? "iPhone" : "iPad"
+        #endif
+    }
+
     private var inputLine: some View {
         let input = model.input
         let usesMIDI = input.noteSource == .midiKeyboard
         return VStack(alignment: .leading, spacing: 8) {
-            Label(usesMIDI ? "Playing on a MIDI keyboard" : "Listening with the microphone",
-                  systemImage: usesMIDI ? "pianokeys" : "mic.fill")
-                .font(.subheadline.weight(.semibold))
-            if !usesMIDI {
-                Text("Tip: a MIDI keyboard is the most accurate. You can choose it in Settings.")
+            if game.playsOn == .piano {
+                Label(usesMIDI ? "Playing on a MIDI keyboard" : "Listening to the piano with the microphone",
+                      systemImage: usesMIDI ? "pianokeys" : "mic.fill")
+                    .font(.subheadline.weight(.semibold))
+                if !usesMIDI {
+                    Text("Tip: a MIDI keyboard is the most accurate. You can choose it in Settings.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                if let error = input.listeningError {
+                    NoticeBanner(error, style: .warning, systemImage: "mic.slash.fill")
+                }
+            } else {
+                Label("Playing on the \(Self.deviceName)", systemImage: "hand.tap.fill")
+                    .font(.subheadline.weight(.semibold))
+                Text("Tap the keys on the screen, or type A W S E D F T G Y H U J K on a keyboard. "
+                     + "The microphone doesn't listen for notes.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-            }
-            Text("You can also tap the keys on the screen, or type A W S E D F T G Y H U J K on a keyboard.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            if let error = input.listeningError {
-                NoticeBanner(error, style: .warning, systemImage: "mic.slash.fill")
             }
         }
         .fixedSize(horizontal: false, vertical: true)

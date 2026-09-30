@@ -209,13 +209,18 @@ public final class GameEngine {
         // Following the player in Play mode, they may be a little behind the notes or ahead of them.
         let behind = configuration.mode == .play ? lateWindow * bps : window
         let ahead = configuration.mode == .learn ? max(window, configuration.earlyWindowBeats) : lateWindow * bps
-        // Chords close enough to the line to be the ones the player means.
+        // Chords close enough to the line to be the ones the player means. Learn mode takes the notes in
+        // order: only the chord it waits for (or the one coming up) counts, so a wrong note never moves it on.
         var candidates: [Int] = []
         var c = nextChord
         while c < chords.count {
             let t = chartTime(ofChord: c)
             if t > pos + ahead { break }
-            if t >= pos - behind || configuration.mode == .learn { candidates.append(c) }
+            if configuration.mode == .learn {
+                candidates.append(c)
+                break
+            }
+            if t >= pos - behind { candidates.append(c) }
             c += 1
         }
         let heldChord = holdingForSilence ? nextChord : nil

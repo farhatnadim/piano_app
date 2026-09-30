@@ -98,6 +98,30 @@ final class GameEngineTests: XCTestCase {
         XCTAssertGreaterThan(engine.position, chart.notes[0].time)
     }
 
+    func testLearnModeTakesTheNotesInOrder() {
+        var config = GameConfiguration()
+        config.mode = .learn
+        config.adaptiveSpeed = false
+        let engine = GameEngine(chart: chart, configuration: config)
+        engine.start(at: 0)
+        var clock = 0.0
+        while !engine.isWaiting { clock += 1.0 / 60; engine.update(to: clock) }
+        engine.handle(midiOnset([48, 64], at: clock), at: clock)
+        // Waiting for the second E (64): the F after it (65) is a wrong note, not an early hit.
+        while !engine.isWaiting { clock += 1.0 / 60; engine.update(to: clock) }
+        engine.handle(midiOnset([65], at: clock), at: clock)
+        XCTAssertEqual(engine.takeEvents().last, .wrongNote(midi: 65))
+        XCTAssertTrue(engine.isWaiting)
+        XCTAssertEqual(engine.upcomingNotes.map(\.midi), [64])
+        XCTAssertEqual(engine.statuses[3], .pending, "the F is still to come")
+        // Played ahead in order, a note counts before it reaches the line.
+        engine.handle(midiOnset([64], at: clock), at: clock)
+        clock += 0.05
+        engine.update(to: clock)
+        engine.handle(midiOnset([65], at: clock), at: clock)
+        XCTAssertEqual(engine.statuses[3], .hit(.perfect))
+    }
+
     func testLearnModeTimeSpentPausedDoesNotCountAsWaiting() {
         var config = GameConfiguration()
         config.mode = .learn

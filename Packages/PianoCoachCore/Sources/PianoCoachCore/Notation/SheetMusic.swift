@@ -68,6 +68,9 @@ public struct SheetMusic: Sendable {
         public var timeSignature: TimeSignature
         /// The first measure, or a change of time signature.
         public var showsTimeSignature: Bool
+        /// A pickup (a first measure shorter than the next) is the end of a full measure: how far into one
+        /// it starts, in beats. 0 for other measures.
+        public var pickupOffset: Double = 0
         public var endBeat: Double { startBeat + lengthBeats }
     }
 
@@ -171,6 +174,13 @@ public struct SheetMusic: Sendable {
             result.append(Measure(startBeat: start, lengthBeats: length, timeSignature: signature,
                                   showsTimeSignature: result.last.map { $0.timeSignature != signature } ?? true))
         }
+        // A first measure shorter than the next is a pickup, written in the next one's time signature (a
+        // MIDI file gives it a signature of its own length, such as 2/16).
+        if result.count > 1, result[0].lengthBeats < result[1].lengthBeats - 1e-6 {
+            result[0].pickupOffset = result[1].lengthBeats - result[0].lengthBeats
+            result[0].timeSignature = result[1].timeSignature
+            result[1].showsTimeSignature = false
+        }
         // Enough measures to hold every note.
         while let last = result.last, last.endBeat < end - 1e-6 {
             result.append(Measure(startBeat: last.endBeat, lengthBeats: last.timeSignature.quarterBeatsPerMeasure,
@@ -264,7 +274,9 @@ public struct SheetMusic: Sendable {
                 k += 1
             }
             chordIndex = k
-            if measureEvents.isEmpty {
+            if measureEvents.isEmpty && measure.pickupOffset > 0 {
+                measureEvents = rests(from: measure.startBeat, to: measure.endBeat, measure: m, clef: clef)
+            } else if measureEvents.isEmpty {
                 measureEvents = [Event(clef: clef, beat: measure.startBeat, gridBeat: measure.startBeat, value: .whole,
                                        heads: [], isMeasureRest: true, stemUp: true, beam: nil, tiedTo: nil,
                                        isTieContinuation: false, measureIndex: m)]
@@ -290,7 +302,7 @@ public struct SheetMusic: Sendable {
     /// sixteenth…), again and again.
     public static func values(from position: Double, length: Double, in measure: Measure) -> [NoteValue] {
         var result: [NoteValue] = []
-        var p = position
+        var p = position + measure.pickupOffset
         var remaining = length
         func multiple(_ x: Double, of unit: Double) -> Bool { abs(x / unit - (x / unit).rounded()) < 1e-6 }
         while remaining > 1e-6 {
@@ -375,7 +387,8 @@ public struct SheetMusic: Sendable {
                 let measure = measures[event.measureIndex]
                 let signature = measure.timeSignature
                 let unit = signature.beatType == 8 && signature.beats % 3 == 0 ? 1.5 : 1.0
-                let key = (clef, event.measureIndex, Int(((event.gridBeat - measure.startBeat) / unit + 1e-6).rounded(.down)))
+                let inMeasure = event.gridBeat - measure.startBeat + measure.pickupOffset
+                let key = (clef, event.measureIndex, Int((inMeasure / unit + 1e-6).rounded(.down)))
                 guard !event.isRest, event.value.flags > 0 else {
                     close()
                     groupKey = nil

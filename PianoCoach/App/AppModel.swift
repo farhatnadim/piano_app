@@ -80,6 +80,7 @@ final class AppModel {
             libraryError = "Couldn't open the library folder: \(error.localizedDescription)"
         }
         pieces = sortedPieces(store?.loadPieces() ?? [])
+        addCleanFurEliseIfNeeded()
 
         game.onFinished = { [weak self] result in self?.recordGame(result) }
         voice.onCommand = { [weak self] command in self?.handle(command) }
@@ -121,6 +122,26 @@ final class AppModel {
                 stopMicrophoneIfIdle()
             }
         }
+    }
+
+    /// Adds "Für Elise (clean notes)" to the library, once: exact notes for the easy tutorial, in time with
+    /// its video — to practise with, and to try the game on notes that are right.
+    private func addCleanFurEliseIfNeeded() {
+        let key = "addedCleanFurElise"
+        guard !UserDefaults.standard.bool(forKey: key), let store else { return }
+        let score = CleanFurElise.score
+        guard let attachment = try? store.importAttachment(data: MIDIFileWriter.data(for: score), fileExtension: "mid",
+                                                           originalName: "\(CleanFurElise.title).mid") else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        var piece = Piece(title: CleanFurElise.title, videoID: CleanFurElise.videoID)
+        piece.sheet = attachment
+        piece.songInfo = SongInfo(origin: .sheetMusic, keyName: "A minor", tempoBPM: CleanFurElise.tempoBPM,
+                                  noteCount: score.notes.count, videoTimeOfBeatZero: CleanFurElise.videoTimeOfBeatZero)
+        if let chart = NoteChart.from(score: score, title: piece.title) {
+            piece.difficulty = ChartDifficulty.estimate(chart).level
+        }
+        pieces.insert(piece, at: 0)
+        persist()
     }
 
     // MARK: - Library editing
@@ -470,8 +491,8 @@ final class AppModel {
     }
 
     #if DEBUG
-    /// Screenshot mode used by CI: `-screenshot-demo keys|notes|start|learn|trim|edit [landscape]` opens a built-in
-    /// song (without voice commands, so no permission prompts cover the screen).
+    /// Screenshot mode used by CI: `-screenshot-demo keys|notes|start|learn|trim|edit [landscape] [notation|furelise]`
+    /// opens a built-in song (without voice commands, so no permission prompts cover the screen).
     private func startScreenshotDemoIfRequested() {
         let arguments = ProcessInfo.processInfo.arguments
         guard let flag = arguments.firstIndex(of: "-screenshot-demo") else { return }
@@ -496,6 +517,8 @@ final class AppModel {
                                      noteCount: NotationTestSong.score.notes.count)
             piece = test
             pieces.insert(piece, at: 0)
+        } else if scene.contains("furelise"), let clean = pieces.first(where: { $0.title == CleanFurElise.title }) {
+            piece = clean
         } else if let existing = pieces.first(where: { $0.title == DemoSong.title }) {
             piece = existing
         } else {

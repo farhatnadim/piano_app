@@ -15,6 +15,18 @@ enum GameDisplay: String, CaseIterable, Identifiable, Codable {
     var displayName: String { self == .keys ? "Keys" : "Notes" }
 }
 
+/// What the child plays on.
+enum PlayInstrument: String, CaseIterable, Identifiable {
+    /// A real piano: heard through the microphone (or a MIDI keyboard, chosen in Settings).
+    case piano
+    /// The keys on the screen: only taps count, and the microphone doesn't listen for notes.
+    case screen
+
+    static let storageKey = "playsOn"
+
+    var id: String { rawValue }
+}
+
 /// Feedback drawn on a piano key.
 enum KeyGlow: Equatable {
     /// Played by the "Watch and listen" demo.
@@ -81,6 +93,11 @@ final class GameController {
     static let playAlongKey = "playAlong"
     /// Speed the next game starts at (the child's level for this song).
     var startSpeed: Double = 0.6
+    /// A real piano, or the keys on the screen (the microphone then stays out of the game). Remembered.
+    var playsOn: PlayInstrument = PlayInstrument(rawValue: UserDefaults.standard.string(forKey: PlayInstrument.storageKey) ?? "")
+        ?? .piano {
+        didSet { UserDefaults.standard.set(playsOn.rawValue, forKey: PlayInstrument.storageKey) }
+    }
 
     // MARK: State for drawing
 
@@ -131,6 +148,8 @@ final class GameController {
     @ObservationIgnored private var countInTask: Task<Void, Never>?
     /// Whether games listen to the microphone or MIDI keyboard (the screenshot demo plays by itself).
     @ObservationIgnored var listensForNotes = true
+    /// Whether this game hears the child's piano (not when they play on the screen).
+    private var hearsPiano: Bool { listensForNotes && playsOn == .piano }
     @ObservationIgnored private var glowUntil: [Int: (glow: KeyGlow, until: Double)] = [:]
     @ObservationIgnored private var cheerUntil: Double = 0
     @ObservationIgnored private var cheerCounter = 0
@@ -215,7 +234,7 @@ final class GameController {
         accompaniedUpTo = -.infinity
         lastSounded = nil
         // The whole song playing aloud would be heard by the microphone as the child's notes.
-        input.playbackEchoCancellation = listensForNotes && playsWholeSong
+        input.playbackEchoCancellation = hearsPiano && playsWholeSong
         attachInput()
         startTimer()
         if needsSound { try? sound.start() }
@@ -244,7 +263,7 @@ final class GameController {
     func resume() {
         guard phase == .paused, let engine else { return }
         // The app may have stopped the listener and the piano meanwhile (e.g. it went to the background).
-        if listensForNotes && !input.isListening { input.startListening() }
+        if hearsPiano && !input.isListening { input.startListening() }
         if needsSound { try? sound.start() }
         phase = .playing
         engine.start(at: MonotonicClock.now())
@@ -411,6 +430,8 @@ final class GameController {
         }
         guard phase == .playing, let engine else { return }
         let now = MonotonicClock.now()
+        // The microphone (playing on a piano) will hear this key from the speaker: that isn't the child playing.
+        lastSounded = ([midi], now)
         let onset = NoteOnset(time: now, strength: 1, levelDB: -20, features: .template(forPitches: [midi]),
                               midiPitches: [midi])
         engine.handle(onset, at: now)
@@ -420,7 +441,12 @@ final class GameController {
 
     private func attachInput() {
         input.noteObserver = { [weak self] onset, clock in self?.heard(onset, at: clock) }
-        if listensForNotes && !input.isListening { input.startListening() }
+        if hearsPiano {
+            if !input.isListening { input.startListening() }
+        } else if input.isListening {
+            // Playing on the screen: the microphone (or a MIDI keyboard) isn't part of the game.
+            input.stopListening()
+        }
     }
 
     private func detachInput() {
@@ -429,7 +455,7 @@ final class GameController {
     }
 
     private func heard(_ onset: NoteOnset, at clock: Double) {
-        guard phase == .playing, let engine else { return }
+        guard phase == .playing, hearsPiano, let engine else { return }
         if isEchoOfPlayAlong(onset, at: clock, engine: engine) { return }
         // What the microphone hears shows only as the game's verdict (green or red); guessing which keys
         // it heard lit up overtones and room noise all over the keyboard.
