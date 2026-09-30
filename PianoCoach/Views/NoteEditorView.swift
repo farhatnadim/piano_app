@@ -54,7 +54,7 @@ struct NoteEditorView: View {
             PianoRollEditor(notes: notes, selection: selection, tempoBPM: tempoBPM, barLength: barLength,
                             offset: offset, playerTime: player.currentTime, playerRate: player.rate,
                             isPlaying: player.state == .playing, timeUpdatedAt: timeUpdatedAt,
-                            onTap: { tapped(time: $0, midi: $1) },
+                            onTap: { tapped($0) },
                             onDrag: { drag($0) })
                 .frame(maxHeight: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -64,7 +64,7 @@ struct NoteEditorView: View {
                 Text(addMode ? "Tap the roll where a note is missing." : "Tap a note to change or remove it.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                    .frame(height: 44)
+                    .frame(height: 52)
             }
         }
         .padding(16)
@@ -151,19 +151,27 @@ struct NoteEditorView: View {
             Button(role: .destructive) { remove(selected.id) } label: { Label("Delete", systemImage: "trash") }
         }
         .buttonStyle(.bordered)
+        .controlSize(.large)
         .font(.callout)
-        .frame(height: 44)
+        .frame(height: 52)
     }
 
     // MARK: - Editing
 
-    private func tapped(time: Double, midi: Int) {
-        let b = beat(atVideoTime: time)
-        if let hit = notes.last(where: { $0.note.midi == midi && b >= $0.note.beat && b <= $0.note.beat + max(0.25, $0.note.durationBeats) }) {
-            selection = hit.id
+    private func tapped(_ target: PianoRollEditor.TapTarget) {
+        switch target {
+        case .note(let id):
+            selection = id
             addMode = false
-            play(midi: hit.note.midi)
-        } else if addMode {
+            if let hit = notes.first(where: { $0.id == id }) { play(midi: hit.note.midi) }
+        case .empty(let time, let midi):
+            addOrDeselect(time: time, midi: midi)
+        }
+    }
+
+    private func addOrDeselect(time: Double, midi: Int) {
+        let b = beat(atVideoTime: time)
+        if addMode {
             let note = ScoreNote(midi: midi, beat: max(0, b), durationBeats: 1, hand: midi >= 60 ? .right : .left,
                                  measureIndex: 0, velocity: 0.7)
             let added = EditableNote(id: UUID(), note: note)
@@ -270,17 +278,24 @@ private struct PianoRollEditor: View {
     let playerRate: Double
     let isPlaying: Bool
     let timeUpdatedAt: Double
-    /// Tap at a video time and a MIDI key.
-    let onTap: (Double, Int) -> Void
+    /// What a tap landed on: a note (the nearest one within a finger's reach), or an empty spot.
+    enum TapTarget {
+        case note(UUID)
+        case empty(time: Double, midi: Int)
+    }
+
+    let onTap: (TapTarget) -> Void
     /// Drag by seconds (nil when the drag ends).
     let onDrag: (Double?) -> Void
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var dragging = false
 
-    static let pixelsPerSecond: CGFloat = 140
+    static let pixelsPerSecond: CGFloat = 200
     static let gutter: CGFloat = 40
     static let playheadFraction: CGFloat = 0.3
+    /// A tap this close to a note (in points) picks it: about a fingertip.
+    static let touchSlop: CGFloat = 28
 
     private var rows: ClosedRange<Int> {
         let pitches = notes.map(\.note.midi)
@@ -291,8 +306,8 @@ private struct PianoRollEditor: View {
 
     var body: some View {
         GeometryReader { geo in
-            TimelineView(.animation) { context in
-                let now = isPlaying ? playerTime + (MonotonicClock.now() - timeUpdatedAt) * playerRate : playerTime
+            TimelineView(.animation) { _ in
+                let now = currentTime
                 Canvas { ctx, size in draw(in: &ctx, size: size, now: now) }
             }
             .contentShape(Rectangle())
@@ -308,8 +323,8 @@ private struct PianoRollEditor: View {
                         if dragging {
                             dragging = false
                             onDrag(nil)
-                        } else if let hit = key(at: value.location, size: geo.size) {
-                            onTap(hit.time, hit.midi)
+                        } else if let target = target(at: value.location, size: geo.size) {
+                            onTap(target)
                         }
                     }
             )
@@ -328,14 +343,39 @@ private struct PianoRollEditor: View {
         Self.gutter + (size.width - Self.gutter) * Self.playheadFraction + CGFloat(t - now) * Self.pixelsPerSecond
     }
 
-    private func key(at point: CGPoint, size: CGSize) -> (time: Double, midi: Int)? {
+    /// The video time now, running on smoothly between the player's time updates.
+    private var currentTime: Double {
+        isPlaying ? playerTime + (MonotonicClock.now() - timeUpdatedAt) * playerRate : playerTime
+    }
+
+    /// Where note `n` is drawn with the playhead at `now` (nil when off screen).
+    private func rect(of n: ScoreNote, now: Double, size: CGSize) -> CGRect? {
+        guard rows.contains(n.midi) else { return nil }
+        let rowH = rowHeight(size)
+        let x0 = max(Self.gutter, x(videoTime: videoTime(n.beat), now: now, size: size))
+        let x1 = x(videoTime: videoTime(n.beat + max(0.15, n.durationBeats)), now: now, size: size)
+        guard x1 > x0, x0 < size.width else { return nil }
+        return CGRect(x: x0, y: y(n.midi, size: size) + 1, width: max(3, x1 - x0 - 1), height: max(4, rowH - 2))
+    }
+
+    /// The note nearest a tap, if one is within `touchSlop`; otherwise the empty spot's time and key.
+    private func target(at point: CGPoint, size: CGSize) -> TapTarget? {
         guard point.x > Self.gutter else { return nil }
+        let now = currentTime
+        var best: (id: UUID, distance: CGFloat)?
+        for item in notes {
+            guard let r = rect(of: item.note, now: now, size: size) else { continue }
+            let dx = max(r.minX - point.x, 0, point.x - r.maxX)
+            let dy = max(r.minY - point.y, 0, point.y - r.maxY)
+            let distance = (dx * dx + dy * dy).squareRoot()
+            if distance <= Self.touchSlop, distance < (best?.distance ?? .infinity) { best = (item.id, distance) }
+        }
+        if let best { return .note(best.id) }
         let row = Int(point.y / rowHeight(size))
         let midi = rows.upperBound - row
         guard rows.contains(midi) else { return nil }
         let playheadX = Self.gutter + (size.width - Self.gutter) * Self.playheadFraction
-        let time = playerTime + Double((point.x - playheadX) / Self.pixelsPerSecond)
-        return (time, midi)
+        return .empty(time: now + Double((point.x - playheadX) / Self.pixelsPerSecond), midi: midi)
     }
 
     private func draw(in ctx: inout GraphicsContext, size: CGSize, now: Double) {
@@ -375,18 +415,14 @@ private struct PianoRollEditor: View {
             let n = item.note
             let start = videoTime(n.beat)
             let end = videoTime(n.beat + max(0.15, n.durationBeats))
-            guard end >= leftTime, start <= rightTime, rows.contains(n.midi) else { continue }
-            let x0 = max(Self.gutter, x(videoTime: start, now: now, size: size))
-            let x1 = x(videoTime: end, now: now, size: size)
-            guard x1 > x0 else { continue }
-            let rect = CGRect(x: x0, y: y(n.midi, size: size) + 1, width: max(3, x1 - x0 - 1), height: max(2, rowH - 2))
+            guard end >= leftTime, start <= rightTime, let rect = rect(of: n, now: now, size: size) else { continue }
             let playing = start <= now && end > now
             var color = GameColors.color(for: n.hand)
             if !playing { color = color.opacity(0.75) }
             ctx.fill(Path(roundedRect: rect, cornerRadius: min(4, rowH / 3)), with: .color(color))
             if item.id == selection {
-                ctx.stroke(Path(roundedRect: rect.insetBy(dx: -1.5, dy: -1.5), cornerRadius: min(5, rowH / 3)),
-                           with: .color(.primary), lineWidth: 2.5)
+                ctx.stroke(Path(roundedRect: rect.insetBy(dx: -2, dy: -2), cornerRadius: min(5, rowH / 3)),
+                           with: .color(.primary), lineWidth: 3)
             }
             if rect.width > 22, rowH >= 12 {
                 let text = ctx.resolve(Text(NoteSpelling.spell(n.midi).letter)

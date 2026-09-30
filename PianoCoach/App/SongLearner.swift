@@ -50,6 +50,9 @@ final class SongLearner {
     private let collector = SampleCollector(maxSeconds: SongLearner.maxSeconds)
     /// Reads the notes off the video's keyboard, when it shows one, while its sound is recorded.
     private let videoKeys = VideoKeyReader()
+    /// Put away for now: on a real Für Elise tutorial the notes read off the video came out worse than
+    /// the ones heard. The reader (`KeyboardVideoReader`, `VideoNoteAligner`) stays, tested, for later.
+    static let readsVideoKeyboard = false
     @ObservationIgnored private var capture: AppAudioCapture?
     @ObservationIgnored private var title = ""
     @ObservationIgnored private var pieceID: UUID?
@@ -135,7 +138,7 @@ final class SongLearner {
             // The keys the video lit up, in seconds of the recording.
             var seen: SeenKeys?
             let read = self.videoKeys.notes()
-            if read.foundKeyboard, let start = recording.startTime {
+            if Self.readsVideoKeyboard, read.foundKeyboard, let start = recording.startTime {
                 let notes = read.notes.map {
                     KeyboardVideoReader.VideoNote(midi: $0.midi, start: $0.start - start, end: $0.end - start, hue: $0.hue)
                 }
@@ -178,11 +181,13 @@ final class SongLearner {
         let collector = collector
         let keys = videoKeys
         keys.reset()
+        var videoSink: AppAudioCapture.VideoSink?
+        if Self.readsVideoKeyboard {
+            videoSink = { pixels, orientation, time in keys.append(pixels, orientation: orientation, time: time) }
+        }
         let capture = AppAudioCapture(sink: { samples, rate, time in
             collector.append(samples, sampleRate: rate, startTime: time)
-        }, videoSink: { pixels, orientation, time in
-            keys.append(pixels, orientation: orientation, time: time)
-        })
+        }, videoSink: videoSink)
         do {
             try await capture.start()
             // Cancelled while the system was asking: don't leave this recording running.
@@ -232,7 +237,7 @@ final class SongLearner {
                 try? await Task.sleep(nanoseconds: 250_000_000)
                 guard let self, gen == self.generation, self.phase == .listening else { return }
                 let stats = self.collector.stats()
-                self.videoKeys.setSearchRect(self.player.rectOnScreen)
+                if Self.readsVideoKeyboard { self.videoKeys.setSearchRect(self.player.rectOnScreen) }
                 self.heardSeconds = stats.seconds
                 self.level = min(1, stats.recentPeak * 2)
                 let now = MonotonicClock.now()
