@@ -17,7 +17,7 @@ enum GameDisplay: String, CaseIterable, Identifiable, Codable {
 
 /// Feedback drawn on a piano key.
 enum KeyGlow: Equatable {
-    /// Held down on a MIDI keyboard, heard through the microphone, or played by the demo.
+    /// Played by the "Watch and listen" demo.
     case pressed
     /// The right note.
     case correct
@@ -115,7 +115,6 @@ final class GameController {
     @ObservationIgnored private var countInTask: Task<Void, Never>?
     /// Whether games listen to the microphone or MIDI keyboard (the screenshot demo plays by itself).
     @ObservationIgnored var listensForNotes = true
-    @ObservationIgnored private var keysDown: Set<Int> = []
     @ObservationIgnored private var glowUntil: [Int: (glow: KeyGlow, until: Double)] = [:]
     @ObservationIgnored private var cheerUntil: Double = 0
     @ObservationIgnored private var cheerCounter = 0
@@ -381,8 +380,6 @@ final class GameController {
             try? await Task.sleep(nanoseconds: 350_000_000)
             self?.sound.noteOff(release)
         }
-        glow(midi, .pressed, for: 0.3)
-        refreshGlows(now: MonotonicClock.now())
         guard phase == .playing, let engine else { return }
         let now = MonotonicClock.now()
         let onset = NoteOnset(time: now, strength: 1, levelDB: -20, features: .template(forPitches: [midi]),
@@ -393,33 +390,20 @@ final class GameController {
 
     private func attachInput() {
         input.noteObserver = { [weak self] onset, clock in self?.heard(onset, at: clock) }
-        input.keyObserver = { [weak self] key, down in self?.key(key, down: down) }
         if listensForNotes && !input.isListening { input.startListening() }
     }
 
     private func detachInput() {
         input.noteObserver = nil
         input.keyObserver = nil
-        keysDown = []
     }
 
     private func heard(_ onset: NoteOnset, at clock: Double) {
         guard phase == .playing, let engine else { return }
         // What the microphone hears shows only as the game's verdict (green or red); guessing which keys
-        // it heard lit up overtones and room noise all over the keyboard. MIDI keys light from key events.
+        // it heard lit up overtones and room noise all over the keyboard.
         engine.handle(onset, at: clock)
         consumeEvents()
-    }
-
-    private func key(_ midi: Int, down: Bool) {
-        if down {
-            keysDown.insert(midi)
-            glow(midi, .pressed, for: 60)       // until released
-        } else {
-            keysDown.remove(midi)
-            if glowUntil[midi]?.glow == .pressed { glowUntil[midi] = nil }
-        }
-        refreshGlows(now: MonotonicClock.now())
     }
 
     // MARK: - Frames
@@ -556,7 +540,6 @@ final class GameController {
         for (midi, entry) in glowUntil {
             if entry.until > now { glows[midi] = entry.glow }
         }
-        for midi in keysDown where glows[midi] == nil { glows[midi] = .pressed }
         glowUntil = glowUntil.filter { $0.value.until > now }
         if glows != keyGlows { keyGlows = glows }
     }
