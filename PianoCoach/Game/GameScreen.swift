@@ -84,14 +84,14 @@ struct GameScreen: View {
 /// The game itself: the HUD, the notes (falling or on the staff) and the keyboard, with the count-in,
 /// pause and results on top. Every size comes from the space available (iPad split view, Stage Manager).
 ///
-/// The keyboard is a real 88-key piano. Unless the child chose to see all 88 keys, a camera zooms in on the
-/// part the song is played on and follows the music (`KeyboardCamera`), with a minimap of the whole piano
-/// above the keys. The falling notes share the keyboard's window, so this view updates every frame.
+/// The keyboard is a real 88-key piano, all of it in view. If the child chooses "Follow the song" instead, a
+/// camera zooms in on the part the song is played on and follows the music (`KeyboardCamera`), with a minimap
+/// of the whole piano above the keys. The falling notes share the keyboard's window, so this view updates every frame.
 private struct PlayArea: View {
     let game: GameController
     let chart: NoteChart
 
-    @AppStorage(KeyboardZoom.storageKey) private var zoom = KeyboardZoom.auto
+    @AppStorage(KeyboardZoom.storageKey) private var zoom = KeyboardZoom.all
     /// The camera for `chart`, built once (it indexes the notes).
     @State private var preparedCamera: KeyboardCamera?
 

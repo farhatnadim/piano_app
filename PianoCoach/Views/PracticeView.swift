@@ -77,7 +77,7 @@ enum NotesImport: Identifiable {
     }
 }
 
-/// The toolbar menu: learn again, use a file instead, share the notes, voice commands.
+/// The toolbar menu: learn again, use a file instead, trim, share the notes, voice commands.
 private struct SongMenu: View {
     @Environment(AppModel.self) private var model
     @Binding var importing: NotesImport?
@@ -95,6 +95,11 @@ private struct SongMenu: View {
             Button { importing = .notes } label: {
                 Label("Use a MIDI or MusicXML file…", systemImage: "doc.badge.plus")
             }
+            if !model.needsLearning, model.game.fullChart != nil {
+                Button { model.showTrimScreen = true } label: {
+                    Label("Trim the start or end…", systemImage: "scissors")
+                }
+            }
             if let url = model.notesFileURL, !model.needsLearning {
                 ShareLink(item: url) {
                     Label("Share the notes", systemImage: "square.and.arrow.up")
@@ -107,7 +112,7 @@ private struct SongMenu: View {
         } label: {
             Label("Song", systemImage: "ellipsis.circle")
         }
-        .help("Learn the song again, use a file, or share its notes")
+        .help("Learn the song again, use a file, trim it, or share its notes")
     }
 }
 

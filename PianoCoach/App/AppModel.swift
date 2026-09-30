@@ -41,6 +41,8 @@ final class AppModel {
     private(set) var notesError: String?
     /// Presents the list of voice commands.
     var showVoiceHelp = false
+    /// Presents the screen that cuts a video's introduction or ending off the song's notes.
+    var showTrimScreen = false
     /// A short confirmation shown after a voice command ("Slower · 60 %").
     private(set) var toast: String?
     @ObservationIgnored private var toastTask: Task<Void, Never>?
@@ -309,6 +311,40 @@ final class AppModel {
         loadNotes(for: piece)
     }
 
+    // MARK: - Trimming
+
+    /// The open song's notes as a score (what trimming works on), if they can be read.
+    func openScore() -> Score? {
+        guard let store, let sheet = openPiece?.sheet, sheet.kind.hasNotes else { return nil }
+        return try? ScoreLoader.loadScore(from: try store.data(for: sheet), kind: sheet.kind)
+    }
+
+    /// Keeps only the notes between two beats of the open song (as a new MIDI file) — to drop a video's
+    /// spoken introduction or the applause at the end — and reloads the game with them.
+    func trimSong(fromBeat start: Double, toBeat end: Double) {
+        guard let store, var piece = openPiece, let score = openScore(),
+              let trimmed = ScoreTrimmer.trim(score, from: start, to: end) else {
+            libraryError = "There would be no notes left."
+            return
+        }
+        game.stop()
+        do {
+            let attachment = try store.importAttachment(data: MIDIFileWriter.data(for: trimmed), fileExtension: "mid",
+                                                        originalName: "\(piece.title).mid")
+            if let old = piece.sheet { store.removeAttachment(old) }
+            piece.sheet = attachment
+            var info = piece.songInfo ?? SongInfo(origin: .sheetMusic, tempoBPM: trimmed.initialTempoBPM, noteCount: 0)
+            info.noteCount = trimmed.notes.count
+            piece.songInfo = info
+            update(piece)
+        } catch {
+            libraryError = "Couldn't save the trimmed notes: \(error.localizedDescription)"
+            return
+        }
+        loadNotes(for: piece)
+        showToast("Kept \(trimmed.notes.count) notes")
+    }
+
     enum ImportError: LocalizedError {
         case noNotes
 
@@ -385,7 +421,7 @@ final class AppModel {
     }
 
     #if DEBUG
-    /// Screenshot mode used by CI: `-screenshot-demo keys|notes|start|learn [landscape]` opens a built-in
+    /// Screenshot mode used by CI: `-screenshot-demo keys|notes|start|learn|trim [landscape]` opens a built-in
     /// song (without voice commands, so no permission prompts cover the screen).
     private func startScreenshotDemoIfRequested() {
         let arguments = ProcessInfo.processInfo.arguments
@@ -434,6 +470,10 @@ final class AppModel {
             #endif
             self.openPiece(piece)
             self.game.display = scene.contains("notes") ? .notes : .keys
+            if scene.contains("trim") {
+                self.showTrimScreen = true
+                return
+            }
             guard !scene.contains("start") else { return }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             self.game.listensForNotes = false

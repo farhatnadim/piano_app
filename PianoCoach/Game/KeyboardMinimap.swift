@@ -90,7 +90,7 @@ struct MinimapRenderer {
 /// Two small round buttons in the corner of the play area: follow the song (zoomed in on its keys) or show
 /// all 88 keys. The choice is remembered.
 struct KeyboardZoomPicker: View {
-    @AppStorage(KeyboardZoom.storageKey) private var zoom = KeyboardZoom.auto
+    @AppStorage(KeyboardZoom.storageKey) private var zoom = KeyboardZoom.all
 
     var body: some View {
         HStack(spacing: 2) {

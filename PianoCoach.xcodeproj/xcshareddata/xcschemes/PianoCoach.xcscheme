@@ -5,7 +5,7 @@
    <BuildAction
       parallelizeBuildables = "YES"
       buildImplicitDependencies = "YES"
-      buildArchitectures = "Automatic">
+      runPostActionsOnFailure = "NO">
       <BuildActionEntries>
          <BuildActionEntry
             buildForTesting = "YES"
@@ -15,7 +15,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "5CA1E00A2E9C6F4000C0FFEE"
+               BlueprintIdentifier = "458F305E01DA832C1F65304D"
                BuildableName = "PianoCoach.app"
                BlueprintName = "PianoCoach"
                ReferencedContainer = "container:PianoCoach.xcodeproj">
@@ -27,10 +27,21 @@
       buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
-      shouldUseLaunchSchemeArgsEnv = "YES">
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      onlyGenerateCoverageForSpecifiedTargets = "NO">
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "458F305E01DA832C1F65304D"
+            BuildableName = "PianoCoach.app"
+            BlueprintName = "PianoCoach"
+            ReferencedContainer = "container:PianoCoach.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
       <Testables>
          <TestableReference
-            skipped = "NO">
+            skipped = "NO"
+            parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "PianoCoachCoreTests"
@@ -40,6 +51,8 @@
             </BuildableReference>
          </TestableReference>
       </Testables>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
@@ -55,12 +68,14 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "5CA1E00A2E9C6F4000C0FFEE"
+            BlueprintIdentifier = "458F305E01DA832C1F65304D"
             BuildableName = "PianoCoach.app"
             BlueprintName = "PianoCoach"
             ReferencedContainer = "container:PianoCoach.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
@@ -72,12 +87,14 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "5CA1E00A2E9C6F4000C0FFEE"
+            BlueprintIdentifier = "458F305E01DA832C1F65304D"
             BuildableName = "PianoCoach.app"
             BlueprintName = "PianoCoach"
             ReferencedContainer = "container:PianoCoach.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

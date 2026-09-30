@@ -60,6 +60,12 @@ final class TranscriptionModelTests: XCTestCase {
                      notes.count, truth.count, precision, recall, elapsed, Double(audio.count) / BasicPitch.sampleRate))
         XCTAssertGreaterThan(recall, 0.8)
         XCTAssertGreaterThan(precision, 0.7)
+        let checked = SpectralNoteFilter.supportedNotes(notes, samples: audio, sampleRate: BasicPitch.sampleRate)
+        let (checkedPrecision, checkedRecall) = Self.score(found: checked, truth: truth)
+        print(String(format: "After the spectral check: %d notes, precision %.2f, recall %.2f",
+                     checked.count, checkedPrecision, checkedRecall))
+        XCTAssertGreaterThan(checkedRecall, 0.8)
+        XCTAssertGreaterThan(checkedPrecision, precision, "the spectral check should drop overtone ghosts")
 
         let song = try XCTUnwrap(SongArranger.arrange(notes, title: "Ode to Joy"))
         print("Arranged: \(song.keyName), \(song.tempoBPM) BPM, \(song.score.notes.count) notes")

@@ -7,30 +7,35 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		5CA1E0082E9C6F4000C0FFEE /* WebAssets in Resources */ = {isa = PBXBuildFile; fileRef = 5CA1E0072E9C6F4000C0FFEE /* WebAssets */; };
-		5CA1E0092E9C6F4000C0FFEE /* PianoCoachCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5CA1E0152E9C6F4000C0FFEE /* PianoCoachCore */; };
+		28952A349E121408488E8C2F /* WebAssets in Resources */ = {isa = PBXBuildFile; fileRef = 3A850E341EEEE9A516605CE9 /* WebAssets */; };
+		DC5C9CBAA00F4C0F4AC630B0 /* PianoCoachCore in Frameworks */ = {isa = PBXBuildFile; productRef = E7FE6F33676DE4159F04A821 /* PianoCoachCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		5CA1E0042E9C6F4000C0FFEE /* PianoCoach.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PianoCoach.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		5CA1E0072E9C6F4000C0FFEE /* WebAssets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = WebAssets; sourceTree = "<group>"; };
+		286CBBC460E0D32C6D9F2CAC /* PianoCoach.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PianoCoach.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3A850E341EEEE9A516605CE9 /* WebAssets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = WebAssets; sourceTree = SOURCE_ROOT; };
+		7879A651579FB7C2AC0E5405 /* PianoCoachCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PianoCoachCore; path = Packages/PianoCoachCore; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		5CA1E0062E9C6F4000C0FFEE /* Exceptions for "PianoCoach" folder in "PianoCoach" target */ = {
+		27C9F90FEBEA716C50C0B80D /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				PianoCoach.entitlements,
 			);
-			target = 5CA1E00A2E9C6F4000C0FFEE /* PianoCoach */;
+			target = 458F305E01DA832C1F65304D /* PianoCoach */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		5CA1E0052E9C6F4000C0FFEE /* PianoCoach */ = {
+		8EF0BED0E782C3AEAF76F5E4 /* PianoCoach */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				5CA1E0062E9C6F4000C0FFEE /* Exceptions for "PianoCoach" folder in "PianoCoach" target */,
+				27C9F90FEBEA716C50C0B80D /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
 			);
 			path = PianoCoach;
 			sourceTree = "<group>";
@@ -38,30 +43,39 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		5CA1E00C2E9C6F4000C0FFEE /* Frameworks */ = {
+		7AF90FBB8E34F7C4FB8709A8 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5CA1E0092E9C6F4000C0FFEE /* PianoCoachCore in Frameworks */,
+				DC5C9CBAA00F4C0F4AC630B0 /* PianoCoachCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		5CA1E0022E9C6F4000C0FFEE = {
+		5DA55FDF136B9A73A7C61E97 = {
 			isa = PBXGroup;
 			children = (
-				5CA1E0052E9C6F4000C0FFEE /* PianoCoach */,
-				5CA1E0072E9C6F4000C0FFEE /* WebAssets */,
-				5CA1E0032E9C6F4000C0FFEE /* Products */,
+				3A850E341EEEE9A516605CE9 /* WebAssets */,
+				ACFD71F1225C76113BE36A33 /* Packages */,
+				8EF0BED0E782C3AEAF76F5E4 /* PianoCoach */,
+				FE3B0F65AA078B2AC9500600 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		5CA1E0032E9C6F4000C0FFEE /* Products */ = {
+		ACFD71F1225C76113BE36A33 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				5CA1E0042E9C6F4000C0FFEE /* PianoCoach.app */,
+				7879A651579FB7C2AC0E5405 /* PianoCoachCore */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		FE3B0F65AA078B2AC9500600 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				286CBBC460E0D32C6D9F2CAC /* PianoCoach.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -69,79 +83,79 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		5CA1E00A2E9C6F4000C0FFEE /* PianoCoach */ = {
+		458F305E01DA832C1F65304D /* PianoCoach */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 5CA1E0112E9C6F4000C0FFEE /* Build configuration list for PBXNativeTarget "PianoCoach" */;
+			buildConfigurationList = 8BF14D648311A9E1AF354C91 /* Build configuration list for PBXNativeTarget "PianoCoach" */;
 			buildPhases = (
-				5CA1E00B2E9C6F4000C0FFEE /* Sources */,
-				5CA1E00C2E9C6F4000C0FFEE /* Frameworks */,
-				5CA1E00D2E9C6F4000C0FFEE /* Resources */,
+				F91225F276BA686DA5B72113 /* Sources */,
+				0B41C8550EE48C96C05C976B /* Resources */,
+				7AF90FBB8E34F7C4FB8709A8 /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				5CA1E0052E9C6F4000C0FFEE /* PianoCoach */,
+				8EF0BED0E782C3AEAF76F5E4 /* PianoCoach */,
 			);
 			name = PianoCoach;
 			packageProductDependencies = (
-				5CA1E0152E9C6F4000C0FFEE /* PianoCoachCore */,
+				E7FE6F33676DE4159F04A821 /* PianoCoachCore */,
 			);
 			productName = PianoCoach;
-			productReference = 5CA1E0042E9C6F4000C0FFEE /* PianoCoach.app */;
+			productReference = 286CBBC460E0D32C6D9F2CAC /* PianoCoach.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		5CA1E0012E9C6F4000C0FFEE /* Project object */ = {
+		8B868A7E9E9A166D2C779A6C /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 1600;
+				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
-					5CA1E00A2E9C6F4000C0FFEE = {
-						CreatedOnToolsVersion = 16.0;
+					458F305E01DA832C1F65304D = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
 					};
 				};
 			};
-			buildConfigurationList = 5CA1E00E2E9C6F4000C0FFEE /* Build configuration list for PBXProject "PianoCoach" */;
+			buildConfigurationList = 31AF495DC537CF9FCFB42C21 /* Build configuration list for PBXProject "PianoCoach" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				en,
 				Base,
+				en,
 			);
-			mainGroup = 5CA1E0022E9C6F4000C0FFEE;
+			mainGroup = 5DA55FDF136B9A73A7C61E97;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				5CA1E0142E9C6F4000C0FFEE /* XCLocalSwiftPackageReference "Packages/PianoCoachCore" */,
+				59EC3998046197CFE6EAD39A /* XCLocalSwiftPackageReference "Packages/PianoCoachCore" */,
 			);
 			preferredProjectObjectVersion = 77;
-			productRefGroup = 5CA1E0032E9C6F4000C0FFEE /* Products */;
+			productRefGroup = FE3B0F65AA078B2AC9500600 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				5CA1E00A2E9C6F4000C0FFEE /* PianoCoach */,
+				458F305E01DA832C1F65304D /* PianoCoach */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		5CA1E00D2E9C6F4000C0FFEE /* Resources */ = {
+		0B41C8550EE48C96C05C976B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5CA1E0082E9C6F4000C0FFEE /* WebAssets in Resources */,
+				28952A349E121408488E8C2F /* WebAssets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		5CA1E00B2E9C6F4000C0FFEE /* Sources */ = {
+		F91225F276BA686DA5B72113 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -151,7 +165,111 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		5CA1E00F2E9C6F4000C0FFEE /* Debug */ = {
+		3B271C487DE84122BD8D96A7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = PianoCoach/PianoCoach.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				"ENABLE_APP_SANDBOX[sdk=macosx*]" = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				"ENABLE_OUTGOING_NETWORK_CONNECTIONS[sdk=macosx*]" = YES;
+				ENABLE_PREVIEWS = YES;
+				"ENABLE_RESOURCE_ACCESS_AUDIO_INPUT[sdk=macosx*]" = YES;
+				"ENABLE_RESOURCE_ACCESS_BLUETOOTH[sdk=macosx*]" = YES;
+				"ENABLE_RESOURCE_ACCESS_USB[sdk=macosx*]" = YES;
+				"ENABLE_USER_SELECTED_FILES[sdk=macosx*]" = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				"INFOPLIST_FILE[sdk=iphoneos*]" = "Config/iOS-Info.plist";
+				"INFOPLIST_FILE[sdk=iphonesimulator*]" = "Config/iOS-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Piano Coach";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Piano Coach uses Bluetooth to connect to a Bluetooth MIDI keyboard or digital piano, so it knows exactly which notes are played.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Piano Coach listens to the piano to hear which notes you play in the game, and hears voice commands like \"play\", \"stop\" and \"slower\". If it can't record a video's sound directly, it listens to the video through the microphone to learn the song.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Lets you control the game with your voice, like \"play\", \"stop\", \"slower\" or \"faster\". This happens on the device when possible; otherwise Apple's speech service is used.";
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.farhatnadim.PianoCoach;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		6DCA0A26459EF94A938CF241 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = PianoCoach/PianoCoach.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				"ENABLE_APP_SANDBOX[sdk=macosx*]" = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				"ENABLE_OUTGOING_NETWORK_CONNECTIONS[sdk=macosx*]" = YES;
+				ENABLE_PREVIEWS = YES;
+				"ENABLE_RESOURCE_ACCESS_AUDIO_INPUT[sdk=macosx*]" = YES;
+				"ENABLE_RESOURCE_ACCESS_BLUETOOTH[sdk=macosx*]" = YES;
+				"ENABLE_RESOURCE_ACCESS_USB[sdk=macosx*]" = YES;
+				"ENABLE_USER_SELECTED_FILES[sdk=macosx*]" = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				"INFOPLIST_FILE[sdk=iphoneos*]" = "Config/iOS-Info.plist";
+				"INFOPLIST_FILE[sdk=iphonesimulator*]" = "Config/iOS-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Piano Coach";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Piano Coach uses Bluetooth to connect to a Bluetooth MIDI keyboard or digital piano, so it knows exactly which notes are played.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Piano Coach listens to the piano to hear which notes you play in the game, and hears voice commands like \"play\", \"stop\" and \"slower\". If it can't record a video's sound directly, it listens to the video through the microphone to learn the song.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Lets you control the game with your voice, like \"play\", \"stop\", \"slower\" or \"faster\". This happens on the device when possible; otherwise Apple's speech service is used.";
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.farhatnadim.PianoCoach;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		944771DF0E247F8EF413A458 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -207,12 +325,13 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = auto;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
 		};
-		5CA1E0102E9C6F4000C0FFEE /* Release */ = {
+		F006F4D091FDBEA224163D63 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -261,150 +380,47 @@
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
+				SDKROOT = auto;
 				SWIFT_COMPILATION_MODE = wholemodule;
-			};
-			name = Release;
-		};
-		5CA1E0122E9C6F4000C0FFEE /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = PianoCoach/PianoCoach.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
-				"ENABLE_APP_SANDBOX[sdk=macosx*]" = YES;
-				ENABLE_HARDENED_RUNTIME = YES;
-				"ENABLE_OUTGOING_NETWORK_CONNECTIONS[sdk=macosx*]" = YES;
-				ENABLE_PREVIEWS = YES;
-				"ENABLE_RESOURCE_ACCESS_AUDIO_INPUT[sdk=macosx*]" = YES;
-				"ENABLE_RESOURCE_ACCESS_BLUETOOTH[sdk=macosx*]" = YES;
-				"ENABLE_RESOURCE_ACCESS_USB[sdk=macosx*]" = YES;
-				"ENABLE_USER_SELECTED_FILES[sdk=macosx*]" = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Piano Coach";
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Piano Coach uses Bluetooth to connect to a Bluetooth MIDI keyboard or digital piano, so it knows exactly which notes are played.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Piano Coach listens to the piano to hear which notes you play in the game, and hears voice commands like \"play\", \"stop\" and \"slower\". If it can't record a video's sound directly, it listens to the video through the microphone to learn the song.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Lets you control the game with your voice, like \"play\", \"stop\", \"slower\" or \"faster\". This happens on the device when possible; otherwise Apple's speech service is used.";
-				"INFOPLIST_FILE[sdk=iphoneos*]" = "Config/iOS-Info.plist";
-				"INFOPLIST_FILE[sdk=iphonesimulator*]" = "Config/iOS-Info.plist";
-				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
-				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
-				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
-				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
-				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.farhatnadim.PianoCoach;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
-				SUPPORTS_MACCATALYST = NO;
-				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		5CA1E0132E9C6F4000C0FFEE /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = PianoCoach/PianoCoach.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
-				"ENABLE_APP_SANDBOX[sdk=macosx*]" = YES;
-				ENABLE_HARDENED_RUNTIME = YES;
-				"ENABLE_OUTGOING_NETWORK_CONNECTIONS[sdk=macosx*]" = YES;
-				ENABLE_PREVIEWS = YES;
-				"ENABLE_RESOURCE_ACCESS_AUDIO_INPUT[sdk=macosx*]" = YES;
-				"ENABLE_RESOURCE_ACCESS_BLUETOOTH[sdk=macosx*]" = YES;
-				"ENABLE_RESOURCE_ACCESS_USB[sdk=macosx*]" = YES;
-				"ENABLE_USER_SELECTED_FILES[sdk=macosx*]" = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Piano Coach";
-				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Piano Coach uses Bluetooth to connect to a Bluetooth MIDI keyboard or digital piano, so it knows exactly which notes are played.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Piano Coach listens to the piano to hear which notes you play in the game, and hears voice commands like \"play\", \"stop\" and \"slower\". If it can't record a video's sound directly, it listens to the video through the microphone to learn the song.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Lets you control the game with your voice, like \"play\", \"stop\", \"slower\" or \"faster\". This happens on the device when possible; otherwise Apple's speech service is used.";
-				"INFOPLIST_FILE[sdk=iphoneos*]" = "Config/iOS-Info.plist";
-				"INFOPLIST_FILE[sdk=iphonesimulator*]" = "Config/iOS-Info.plist";
-				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
-				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
-				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
-				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
-				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
-				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.farhatnadim.PianoCoach;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
-				SUPPORTS_MACCATALYST = NO;
-				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		5CA1E00E2E9C6F4000C0FFEE /* Build configuration list for PBXProject "PianoCoach" */ = {
+		31AF495DC537CF9FCFB42C21 /* Build configuration list for PBXProject "PianoCoach" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				5CA1E00F2E9C6F4000C0FFEE /* Debug */,
-				5CA1E0102E9C6F4000C0FFEE /* Release */,
+				944771DF0E247F8EF413A458 /* Debug */,
+				F006F4D091FDBEA224163D63 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
+			defaultConfigurationName = Debug;
 		};
-		5CA1E0112E9C6F4000C0FFEE /* Build configuration list for PBXNativeTarget "PianoCoach" */ = {
+		8BF14D648311A9E1AF354C91 /* Build configuration list for PBXNativeTarget "PianoCoach" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				5CA1E0122E9C6F4000C0FFEE /* Debug */,
-				5CA1E0132E9C6F4000C0FFEE /* Release */,
+				6DCA0A26459EF94A938CF241 /* Debug */,
+				3B271C487DE84122BD8D96A7 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
+			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		5CA1E0142E9C6F4000C0FFEE /* XCLocalSwiftPackageReference "Packages/PianoCoachCore" */ = {
+		59EC3998046197CFE6EAD39A /* XCLocalSwiftPackageReference "Packages/PianoCoachCore" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/PianoCoachCore;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		5CA1E0152E9C6F4000C0FFEE /* PianoCoachCore */ = {
+		E7FE6F33676DE4159F04A821 /* PianoCoachCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = PianoCoachCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
-	rootObject = 5CA1E0012E9C6F4000C0FFEE /* Project object */;
+	rootObject = 8B868A7E9E9A166D2C779A6C /* Project object */;
 }

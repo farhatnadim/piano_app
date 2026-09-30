@@ -2,10 +2,11 @@ import Foundation
 import PianoCoachCore
 
 /// How much of the keyboard the game shows: the child's choice, kept in `@AppStorage(KeyboardZoom.storageKey)`.
+/// All 88 keys unless they choose otherwise: a keyboard that zooms and slides is distracting mid-song.
 enum KeyboardZoom: String, CaseIterable, Identifiable {
     /// Zoom in on the keys the song is played on and follow the music up and down the keyboard.
     case auto
-    /// Always show all 88 keys.
+    /// Always show all 88 keys (the default).
     case all
 
     static let storageKey = "keyboardZoom"

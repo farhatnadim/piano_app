@@ -123,6 +123,7 @@ final class SongLearner {
                 self.phase = .failed("I didn't hear enough of the song. Let the video play for a while, then try again.")
                 return
             }
+            Self.saveRecording(recording.samples, sampleRate: recording.sampleRate, title: self.title)
             self.transcribe(recording.samples, sampleRate: recording.sampleRate, origin: .video)
         }
     }
@@ -248,6 +249,33 @@ final class SongLearner {
             return
         }
         playFromStart()
+    }
+
+    /// Keeps the recording as a WAV file in Documents/Recordings (visible in the Files app), so a song
+    /// whose notes came out wrong can be listened to, shared, and learned again from the file.
+    private nonisolated static func saveRecording(_ samples: [Float], sampleRate: Double, title: String) {
+        Task.detached(priority: .utility) {
+            guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+            let folder = documents.appendingPathComponent("Recordings", isDirectory: true)
+            let safeTitle = title.map { $0.isLetter || $0.isNumber || $0 == " " ? $0 : "-" }.reduce(into: "") { $0.append($1) }
+            let name = safeTitle.trimmingCharacters(in: .whitespaces).isEmpty ? "Song" : safeTitle
+            let url = folder.appendingPathComponent("\(name).wav")
+            guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false),
+                  let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)) else { return }
+            buffer.frameLength = AVAudioFrameCount(samples.count)
+            samples.withUnsafeBufferPointer { buffer.floatChannelData![0].update(from: $0.baseAddress!, count: samples.count) }
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try? FileManager.default.removeItem(at: url)
+                let file = try AVAudioFile(forWriting: url, settings: [
+                    AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: sampleRate, AVNumberOfChannelsKey: 1,
+                    AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
+                ])
+                try file.write(from: buffer)
+            } catch {
+                // Only a convenience; the notes are still learned from the samples in memory.
+            }
+        }
     }
 
     // MARK: - Audio files

@@ -42,6 +42,17 @@ struct RootView: View {
             .frame(minWidth: 440, idealWidth: 500, minHeight: 480, idealHeight: 640)
             #endif
         }
+        .sheet(isPresented: $model.showTrimScreen) {
+            NavigationStack {
+                if let chart = model.game.fullChart {
+                    TrimSongView(chart: chart)
+                        .environment(model)
+                }
+            }
+            #if os(macOS)
+            .frame(minWidth: 520, idealWidth: 640, minHeight: 440, idealHeight: 480)
+            #endif
+        }
         .sheet(isPresented: $showAddPiece) {
             AddPieceView()
                 .environment(model)

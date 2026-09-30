@@ -9,6 +9,8 @@ enum GameDisplay: String, CaseIterable, Identifiable, Codable {
     /// A scrolling staff, to learn reading notes; notes light up when played.
     case notes
 
+    static let storageKey = "gameDisplay"
+
     var id: String { rawValue }
     var displayName: String { self == .keys ? "Keys" : "Notes" }
 }
@@ -59,7 +61,10 @@ final class GameController {
         didSet { if oldValue != rendition { renditionChanged() } }
     }
     var hands: HandSelection = .both
-    var display: GameDisplay = .keys
+    /// Notes on the staff by default; the choice is remembered across launches.
+    var display: GameDisplay = GameDisplay(rawValue: UserDefaults.standard.string(forKey: GameDisplay.storageKey) ?? "") ?? .notes {
+        didSet { UserDefaults.standard.set(display.rawValue, forKey: GameDisplay.storageKey) }
+    }
     var showLetters = true
     var adaptiveSpeed = true
     /// Play the hand that isn't being practised with the built-in piano.
