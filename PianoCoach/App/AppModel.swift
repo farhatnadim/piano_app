@@ -488,7 +488,15 @@ final class AppModel {
             return
         }
         let piece: Piece
-        if let existing = pieces.first(where: { $0.title == DemoSong.title }) {
+        if scene.contains("notation") {
+            var test = Piece(title: NotationTestSong.title, videoID: "NotationTst")
+            test.sheet = try? store?.importAttachment(data: MIDIFileWriter.data(for: NotationTestSong.score), fileExtension: "mid",
+                                                      originalName: "\(NotationTestSong.title).mid")
+            test.songInfo = SongInfo(origin: .sheetMusic, keyName: "G major", tempoBPM: 80,
+                                     noteCount: NotationTestSong.score.notes.count)
+            piece = test
+            pieces.insert(piece, at: 0)
+        } else if let existing = pieces.first(where: { $0.title == DemoSong.title }) {
             piece = existing
         } else {
             var demo = Piece(title: DemoSong.title, videoID: "Ode2JoyDemo")

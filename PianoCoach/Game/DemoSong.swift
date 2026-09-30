@@ -54,3 +54,37 @@ enum DemoSong {
         return Score(title: title, measures: measures, events: [], initialTempoBPM: chart.beatsPerMinute, notes: notes)
     }
 }
+
+#if DEBUG
+/// A short made-up piece using everything the sheet music draws (for checking it in screenshots): beamed
+/// eighths and sixteenths, dotted notes, rests, a tie over the bar line, accidentals in G major, a chord
+/// with a second, and notes on ledger lines.
+enum NotationTestSong {
+    static let title = "Notation test"
+
+    static var score: Score {
+        // (MIDI, start beat, beats, hand)
+        let notes: [(Int, Double, Double, Hand)] = [
+            // Measure 1: eighths, a quarter, four sixteenths.
+            (67, 0, 0.5, .right), (69, 0.5, 0.5, .right), (71, 1, 0.5, .right), (72, 1.5, 0.5, .right),
+            (74, 2, 1, .right), (76, 3, 0.25, .right), (78, 3.25, 0.25, .right), (79, 3.5, 0.25, .right), (81, 3.75, 0.25, .right),
+            (43, 0, 2, .left), (50, 0, 2, .left), (43, 2, 2, .left), (47, 2, 2, .left),
+            // Measure 2: dotted quarter + eighth, a half tied into measure 3.
+            (71, 4, 1.5, .right), (69, 5.5, 0.5, .right), (67, 6, 3, .right),
+            (36, 4, 1, .left), (48, 5, 1, .left), (45, 6, 0.5, .left), (47, 6.5, 0.5, .left), (48, 7, 1, .left),
+            // Measure 3: after the tie, a rest, F natural, a chord with a second, a high note on ledger lines.
+            (65, 10, 1, .right), (72, 11, 0.5, .right), (74, 11, 0.5, .right), (86, 11.5, 0.5, .right),
+            (43, 8, 4, .left),
+            // Measure 4: a whole note chord, and a whole-measure rest in the left hand.
+            (67, 12, 4, .right), (71, 12, 4, .right), (74, 12, 4, .right),
+        ]
+        let measures = (0..<4).map {
+            ScoreMeasure(index: $0, sourceIndex: $0, number: String($0 + 1), startBeat: Double($0 * 4), lengthBeats: 4,
+                         timeSignature: .common)
+        }
+        return Score(title: title, measures: measures, events: [], initialTempoBPM: 80,
+                     notes: notes.map { ScoreNote(midi: $0.0, beat: $0.1, durationBeats: $0.2, hand: $0.3, measureIndex: Int($0.1 / 4)) },
+                     keyFifths: 1)
+    }
+}
+#endif

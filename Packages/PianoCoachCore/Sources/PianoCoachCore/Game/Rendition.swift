@@ -47,7 +47,8 @@ extension NoteChart {
                 .map { var n = $0; n.hand = .right; return n }
         }
         return NoteChart(title: title, notes: reduced, beatsPerMinute: beatsPerMinute, barLines: barLines,
-                         source: source, keyFifths: keyFifths, videoTimeOfBeatZero: videoTimeOfBeatZero)
+                         source: source, keyFifths: keyFifths, videoTimeOfBeatZero: videoTimeOfBeatZero,
+                         timeSignatures: timeSignatures)
     }
 
     /// One note per onset (chosen by `keep`), each cut off where the next one starts: a single line

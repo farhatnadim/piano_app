@@ -50,15 +50,20 @@ public struct NoteChart: Codable, Hashable, Sendable {
     public var keyFifths: Int
     /// For charts made by listening: the video time of beat 0, to line the chart up with the video.
     public var videoTimeOfBeatZero: Double?
+    /// The time signature of each measure (parallel to `barLines`), when known; for writing the notes as
+    /// sheet music.
+    public var timeSignatures: [TimeSignature]?
 
     public init(title: String, notes: [ChartNote], beatsPerMinute: Double, barLines: [Double] = [],
-                source: ChartSource, keyFifths: Int = 0, videoTimeOfBeatZero: Double? = nil) {
+                source: ChartSource, keyFifths: Int = 0, videoTimeOfBeatZero: Double? = nil,
+                timeSignatures: [TimeSignature]? = nil) {
         self.title = title
         self.beatsPerMinute = beatsPerMinute > 0 && beatsPerMinute.isFinite ? beatsPerMinute : 60
         self.barLines = barLines
         self.source = source
         self.keyFifths = keyFifths
         self.videoTimeOfBeatZero = videoTimeOfBeatZero
+        self.timeSignatures = timeSignatures
         let sorted = notes.sorted { ($0.time, $0.midi) < ($1.time, $1.midi) }
         self.notes = sorted.enumerated().map { i, n in
             var n = n
@@ -111,7 +116,8 @@ public struct NoteChart: Codable, Hashable, Sendable {
         guard !notes.isEmpty else { return nil }
         return NoteChart(title: title ?? score.title ?? "Song", notes: notes,
                          beatsPerMinute: score.initialTempoBPM ?? 90,
-                         barLines: score.measures.map(\.startBeat), source: .score, keyFifths: score.keyFifths)
+                         barLines: score.measures.map(\.startBeat), source: .score, keyFifths: score.keyFifths,
+                         timeSignatures: score.measures.map(\.timeSignature))
     }
 
     /// A chart worked out from what the coach heard while the video played (see `TrackRecorder`).

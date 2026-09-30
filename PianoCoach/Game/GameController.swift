@@ -88,6 +88,8 @@ final class GameController {
     /// The song's notes as learned or imported; `chart` is the chosen rendition of it.
     private(set) var fullChart: NoteChart?
     private(set) var chart: NoteChart?
+    /// `chart` written as sheet music (for the Notes view), worked out once per chart.
+    @ObservationIgnored private(set) var sheetMusic: SheetMusic?
     /// The Watch playback is stopped where it is (a voice "stop" or the pause button).
     private(set) var isDemoPaused = false
     private(set) var difficulty: ChartDifficulty?
@@ -166,6 +168,7 @@ final class GameController {
     private func applyRendition() {
         let newChart = fullChart.map { $0.rendition(rendition) }.flatMap { $0.isEmpty ? nil : $0 }
         chart = newChart
+        sheetMusic = newChart.map { SheetMusic(chart: $0) }
         difficulty = newChart.map(ChartDifficulty.estimate)
         statuses = newChart.map { $0.notes.map { _ in .pending } } ?? []
         position = firstNoteTime - 4
