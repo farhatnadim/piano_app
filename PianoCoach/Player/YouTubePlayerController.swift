@@ -40,8 +40,21 @@ final class YouTubePlayerController {
 
     let webView: WKWebView
     private let messageProxy = ScriptMessageProxy()
+    private let tapProxy = AudioTapMessageProxy()
     private let navigationHandler = NavigationHandler()
     @ObservationIgnored private var pageTemplate: String?
+    /// The YouTube player's frame, once its audio tap script has said hello.
+    @ObservationIgnored private var tapFrame: WKFrameInfo?
+    /// Receives the video's own sound while the audio tap runs: samples, their rate, the video's time at
+    /// the last sample, and whether the video was playing.
+    @ObservationIgnored var onTapAudio: (([Float], Double, Double, Bool) -> Void)?
+
+    /// The script world the audio tap runs in, apart from the page's and YouTube's own scripts.
+    private static let tapWorld = WKContentWorld.world(name: "PianoCoachAudioTap")
+    /// Put away: WebKit hands Web Audio only silence for YouTube's streamed (MediaSource) video — checked
+    /// in the iOS 26.5 simulator: the tap ran and received blocks, all zero. `WebAssets/audio_tap.js` stays
+    /// for a WebKit that allows it.
+    static let tapsAudio = false
 
     init() {
         let configuration = WKWebViewConfiguration()
@@ -55,6 +68,12 @@ final class YouTubePlayerController {
         configuration.allowsPictureInPictureMediaPlayback = false
         #endif
         configuration.userContentController.add(messageProxy, name: "youtube")
+        if Self.tapsAudio, let url = Bundle.main.url(forResource: "audio_tap", withExtension: "js", subdirectory: "WebAssets"),
+           let source = try? String(contentsOf: url, encoding: .utf8) {
+            configuration.userContentController.addUserScript(
+                WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: false, in: Self.tapWorld))
+            configuration.userContentController.add(tapProxy, contentWorld: Self.tapWorld, name: "pianoAudio")
+        }
 
         webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 640, height: 360), configuration: configuration)
         #if os(iOS)
@@ -72,6 +91,9 @@ final class YouTubePlayerController {
 
         messageProxy.onMessage = { [weak self] body in
             self?.handle(body)
+        }
+        tapProxy.onMessage = { [weak self] body, frame in
+            self?.handleTap(body, frame: frame)
         }
         if let url = Bundle.main.url(forResource: "youtube_player", withExtension: "html", subdirectory: "WebAssets") {
             pageTemplate = try? String(contentsOf: url, encoding: .utf8)
@@ -119,6 +141,7 @@ final class YouTubePlayerController {
         isMuted = muted
         errorMessage = nil
         autoplayBlocked = false
+        tapFrame = nil
         navigationHandler.allowedHost = Self.baseURL.host
         webView.loadHTMLString(template.replacingOccurrences(of: "__PIANO_COACH_CONFIG__", with: jsonString),
                                baseURL: Self.baseURL)
@@ -160,6 +183,51 @@ final class YouTubePlayerController {
     private func run(_ script: String) {
         guard isReady else { return }
         webView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    // MARK: - The video's own sound
+
+    /// Whether the player's frame has loaded the audio tap (`WebAssets/audio_tap.js`).
+    var canTapAudio: Bool { tapFrame != nil }
+
+    /// Starts sending the video's sound to `onTapAudio`. Returns the script's answer ("ok running 48000",
+    /// "no video"…), or nil when the player's frame isn't known yet or didn't answer.
+    func startAudioTap() async -> String? {
+        await callTap("return PianoAudioTap.start();")
+    }
+
+    #if DEBUG
+    /// What the audio tap sees (JSON), for checking it.
+    func audioTapStats() async -> String? {
+        await callTap("return PianoAudioTap.stats();")
+    }
+    #endif
+
+    func stopAudioTap() {
+        Task { _ = await callTap("return PianoAudioTap.stop();") }
+    }
+
+    private func callTap(_ body: String) async -> String? {
+        guard let frame = tapFrame else { return nil }
+        return (try? await webView.callAsyncJavaScript(body, in: frame, contentWorld: Self.tapWorld)) as? String
+    }
+
+    private func handleTap(_ body: Any, frame: WKFrameInfo) {
+        guard let message = body as? [String: Any], let type = message["type"] as? String else { return }
+        switch type {
+        case "hello":
+            tapFrame = frame
+        case "audio":
+            guard let onTapAudio, let rate = (message["rate"] as? NSNumber)?.doubleValue,
+                  let videoTime = (message["videoTime"] as? NSNumber)?.doubleValue,
+                  let encoded = message["pcm"] as? String, let data = Data(base64Encoded: encoded) else { return }
+            var pcm = [Int16](repeating: 0, count: data.count / 2)
+            _ = pcm.withUnsafeMutableBytes { data.copyBytes(to: $0) }
+            let playing = (message["playing"] as? NSNumber)?.boolValue ?? false
+            onTapAudio(pcm.map { Float($0) / 32768 }, rate, videoTime, playing)
+        default:
+            break
+        }
     }
 
     // MARK: - Messages from the page
@@ -226,6 +294,19 @@ private final class ScriptMessageProxy: NSObject, WKScriptMessageHandler {
         // Only our own page (the main frame) talks to the app; ignore anything from the YouTube iframe.
         guard message.frameInfo.isMainFrame else { return }
         onMessage?(message.body)
+    }
+}
+
+/// Forwards the audio tap's messages with the frame they came from. Only the tap's own script world can
+/// post them, and only YouTube's frames run the tap.
+@MainActor
+private final class AudioTapMessageProxy: NSObject, WKScriptMessageHandler {
+    var onMessage: ((Any, WKFrameInfo) -> Void)?
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        let host = message.frameInfo.securityOrigin.host.lowercased()
+        guard host.hasSuffix("youtube.com") || host.hasSuffix("youtube-nocookie.com") else { return }
+        onMessage?(message.body, message.frameInfo)
     }
 }
 

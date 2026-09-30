@@ -7,9 +7,12 @@ import PianoCoachCore
 /// down with the Basic Pitch transcription model, and arranges them into a song — tempo, key, and which
 /// hand plays what — that the game can play back at any speed.
 ///
-/// The video's sound is recorded straight from the system (`AppAudioCapture`). When that isn't possible —
-/// the parent declined the recording prompt, or it records only silence — the microphone listens to the
-/// video from the speaker instead, which works but hears the room too.
+/// The video's sound is recorded from inside the player (`YouTubePlayerController.startAudioTap`, put away
+/// for now): a clean copy of the music, already in the video's time. When that comes out silent, it is
+/// recorded from the system (`AppAudioCapture`: ReplayKit on iPad, which may not hear the player, or
+/// ScreenCaptureKit on a Mac); when that isn't possible either — the parent declined the recording prompt,
+/// or it records only silence — the microphone listens to the video from the speaker, which works but
+/// hears the room too.
 @MainActor
 @Observable
 final class SongLearner {
@@ -31,6 +34,8 @@ final class SongLearner {
     private(set) var level: Float = 0
     /// True when the microphone hears the video (recording the sound directly wasn't possible).
     private(set) var usesMicrophone = false
+    /// True while the video's sound comes straight from the player.
+    private(set) var usesVideoTap = false
     /// True when the last song's notes were read off the video's keyboard rather than heard.
     private(set) var readFromVideo = false
 
@@ -95,7 +100,9 @@ final class SongLearner {
         phase = .starting
         Task { [weak self] in
             guard let self else { return }
-            let started = await self.startDirectCapture(generation: gen)
+            var started = await self.startVideoTap(generation: gen)
+            guard gen == self.generation else { return }
+            if !started { started = await self.startDirectCapture(generation: gen) }
             guard gen == self.generation else { return }
             if !started {
                 guard await self.startMicrophone(generation: gen) else {
@@ -123,6 +130,12 @@ final class SongLearner {
         monitorTask?.cancel()
         player.pause()
         let recording = collector.snapshot()
+        #if DEBUG
+        let loudest = recording.samples.reduce(Float(0)) { max($0, abs($1)) }
+        print("PianoCoach: recorded \(Double(recording.samples.count) / max(1, recording.sampleRate)) s at "
+              + "\(recording.sampleRate) Hz, peak \(loudest), from "
+              + (usesVideoTap ? "the player" : usesMicrophone ? "the microphone" : "the system"))
+        #endif
         // Leave `.listening` now, so a second call (button tap and the video ending) can't transcribe twice.
         phase = .transcribing(0)
         Task { [weak self] in
@@ -157,6 +170,7 @@ final class SongLearner {
         work = nil
         if isListening { player.pause() }
         // Stop this session's recorders now, so a new session can't be stopped by a late cleanup.
+        stopVideoTap()
         if usesMicrophone {
             audio.setChunkHandler(nil)
             usesMicrophone = false
@@ -175,6 +189,55 @@ final class SongLearner {
         player.setRate(1)
         player.seek(to: 0)
         player.play()
+    }
+
+    /// Records the video's sound from inside the player. The recording is kept in the video's time.
+    private func startVideoTap(generation gen: Int) async -> Bool {
+        guard YouTubePlayerController.tapsAudio else { return false }
+        // The player's frame loads the tap a moment after the page.
+        for _ in 0..<50 where !player.canTapAudio {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            guard gen == generation else { return false }
+        }
+        let collector = collector
+        player.onTapAudio = { samples, rate, videoTime, playing in
+            guard playing else { return }
+            collector.place(samples, sampleRate: rate, endingAt: videoTime)
+        }
+        var answer = await player.startAudioTap()
+        // The player may only make its <video> once asked to play.
+        var tries = 0
+        while answer == "no video", tries < 20, gen == generation {
+            if tries == 0 { player.play() }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            answer = await player.startAudioTap()
+            tries += 1
+        }
+        #if DEBUG
+        print("PianoCoach: video audio tap:", answer ?? "no answer")
+        #endif
+        guard gen == generation, let answer, answer.hasPrefix("ok") else {
+            player.onTapAudio = nil
+            return false
+        }
+        usesVideoTap = true
+        #if DEBUG
+        Task { [weak self] in
+            for _ in 0..<8 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, self.usesVideoTap else { return }
+                print("PianoCoach: tap stats", await self.player.audioTapStats() ?? "-", "collected", self.collector.stats().seconds)
+            }
+        }
+        #endif
+        return true
+    }
+
+    private func stopVideoTap() {
+        guard usesVideoTap else { return }
+        usesVideoTap = false
+        player.onTapAudio = nil
+        player.stopAudioTap()
     }
 
     private func startDirectCapture(generation gen: Int) async -> Bool {
@@ -218,6 +281,7 @@ final class SongLearner {
     }
 
     private func stopRecording() async {
+        stopVideoTap()
         if let capture {
             self.capture = nil
             await capture.stop()
@@ -245,16 +309,22 @@ final class SongLearner {
                     self.sawPlayback = true
                     if self.playingSince == nil {
                         self.playingSince = now
-                        self.recordingLead = stats.seconds - self.player.currentTime
+                        // The player's own sound is recorded in the video's time already.
+                        self.recordingLead = self.usesVideoTap ? 0 : stats.seconds - self.player.currentTime
                     }
                 } else if !self.sawPlayback, self.player.state != .buffering, now - self.lastPlayRequest > 2 {
                     // The player wasn't ready yet (or ignored the request): ask again.
                     self.playFromStart()
                 }
-                if let since = self.playingSince, !self.usesMicrophone, self.capture != nil,
-                   now - since > Self.silenceBeforeFallback, stats.peak < 0.0005 {
-                    await self.switchToMicrophone(generation: gen)
-                    continue
+                if let since = self.playingSince, now - since > Self.silenceBeforeFallback, stats.peak < 0.0005 {
+                    if self.usesVideoTap {
+                        await self.switchFromVideoTap(generation: gen)
+                        continue
+                    }
+                    if !self.usesMicrophone, self.capture != nil {
+                        await self.switchToMicrophone(generation: gen)
+                        continue
+                    }
                 }
                 if (self.sawPlayback && self.player.state == .ended) || stats.seconds >= Self.maxSeconds {
                     self.finishListening()
@@ -262,6 +332,30 @@ final class SongLearner {
                 }
             }
         }
+    }
+
+    /// The player's sound came out silent: record the system's sound (or the microphone) instead, from a
+    /// fresh player — the tapped one would stay silent.
+    private func switchFromVideoTap(generation gen: Int) async {
+        #if DEBUG
+        print("PianoCoach: the video audio tap was silent; recording the system's sound instead")
+        #endif
+        stopVideoTap()
+        player.pause()
+        if let videoID = player.videoID { player.load(videoID: videoID, startTime: 0, muted: false) }
+        collector.reset()
+        playingSince = nil
+        recordingLead = nil
+        sawPlayback = false
+        var started = await startDirectCapture(generation: gen)
+        guard gen == generation else { return }
+        if !started { started = await startMicrophone(generation: gen) }
+        guard gen == generation else { return }
+        guard started else {
+            phase = .failed("I can't hear the video. Turn the sound up, or allow the microphone in Settings.")
+            return
+        }
+        playFromStart()
     }
 
     private func switchToMicrophone(generation gen: Int) async {
@@ -519,6 +613,40 @@ final class SampleCollector: @unchecked Sendable {
             recentPeak = loudest
             peak = max(peak, loudest)
             samples.append(contentsOf: converted)
+        }
+    }
+
+    /// Puts samples at their place in time, the last one at `seconds`: the recording then runs in the
+    /// video's time (sample `i` is at `i / sampleRate` seconds of the video), whatever the video did in
+    /// between. Jitter in the reported times is ignored; a jump (the video skipped ahead, stalled, or went
+    /// back) moves the recording with it.
+    func place(_ chunk: [Float], sampleRate rate: Double, endingAt seconds: Double) {
+        guard !chunk.isEmpty, rate > 0, seconds.isFinite else { return }
+        lock.withLock {
+            if sampleRate == 0 {
+                sampleRate = rate
+                startTime = nil
+                samples.reserveCapacity(Int(rate * 60 * 5))
+            }
+            let converted = rate == sampleRate ? chunk : Self.interpolate(chunk, from: rate, to: sampleRate)
+            var start = Int((seconds * sampleRate).rounded()) - converted.count
+            if abs(start - samples.count) <= Int(0.08 * sampleRate) { start = samples.count }
+            var block = converted[...]
+            if start < 0 {
+                block = block.dropFirst(-start)
+                start = 0
+            }
+            guard !block.isEmpty, Double(start + block.count) <= maxSeconds * sampleRate else { return }
+            if start > samples.count {
+                samples.append(contentsOf: repeatElement(0, count: start - samples.count))
+            } else if start < samples.count {
+                samples.removeSubrange(start...)
+            }
+            var loudest: Float = 0
+            for s in block { loudest = max(loudest, abs(s)) }
+            recentPeak = loudest
+            peak = max(peak, loudest)
+            samples.append(contentsOf: block)
         }
     }
 

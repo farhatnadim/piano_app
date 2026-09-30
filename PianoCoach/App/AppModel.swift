@@ -93,6 +93,8 @@ final class AppModel {
         applySettings()
         #if DEBUG
         startScreenshotDemoIfRequested()
+        startLearningTestIfRequested()
+        startVideoPlaybackIfRequested()
         #endif
     }
 
@@ -563,6 +565,60 @@ final class AppModel {
             self.game.listensForNotes = false
             self.game.start()
             self.playScreenshotGame()
+        }
+    }
+
+    /// `-learn-video <video id>` opens the song with that YouTube video (adding it if needed) and learns its
+    /// notes from the video, to check the recording and the notes without tapping through the app.
+    private func startLearningTestIfRequested() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flag = arguments.firstIndex(of: "-learn-video"), flag + 1 < arguments.count else { return }
+        let videoID = arguments[flag + 1]
+        settings.voiceCommandsEnabled = false
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            var piece = self.pieces.first { $0.videoID == videoID }
+            if piece == nil { piece = await self.addPiece(link: "https://youtu.be/\(videoID)", title: "") }
+            guard let piece else { return }
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            self.openPiece(piece)
+            self.showLearnScreen()
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            self.learnFromVideo()
+        }
+    }
+
+    /// `-play-video <video id> [seconds]` opens the song with that YouTube video (adding it if needed) and plays
+    /// the video from the start, muted, logging its time — to record the screen and read a tutorial's notes off
+    /// it. With `seconds`, it plays from there and pauses a moment later (to measure a still frame).
+    private func startVideoPlaybackIfRequested() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flag = arguments.firstIndex(of: "-play-video"), flag + 1 < arguments.count else { return }
+        let videoID = arguments[flag + 1]
+        let pauseNear = flag + 2 < arguments.count ? Double(arguments[flag + 2]) : nil
+        settings.voiceCommandsEnabled = false
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            var piece = self.pieces.first { $0.videoID == videoID }
+            if piece == nil { piece = await self.addPiece(link: "https://youtu.be/\(videoID)", title: "") }
+            guard let piece else { return }
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            self.openPiece(piece)
+            self.showLearnScreen()
+            for _ in 0..<150 where !self.player.isReady { try? await Task.sleep(nanoseconds: 100_000_000) }
+            self.player.setMuted(true)
+            self.player.seek(to: pauseNear ?? 0)
+            self.player.play()
+            if pauseNear != nil {
+                for _ in 0..<200 where self.player.state != .playing { try? await Task.sleep(nanoseconds: 50_000_000) }
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                self.player.pause()
+            }
+            while !Task.isCancelled {
+                print(String(format: "PianoCoach: wall %.3f video %.3f state %d", Date().timeIntervalSince1970,
+                             self.player.currentTime, self.player.state.rawValue))
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
         }
     }
 
