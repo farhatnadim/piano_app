@@ -333,7 +333,18 @@ struct StartPanel: View {
                     displayPicker
                 }
             }
-            if game.hands != .both {
+            Toggle(isOn: $game.playAlong) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("The piano plays along")
+                    Text(game.mode == .play ? "The whole song, in time with the notes"
+                                            : "Each note sounds when you play it")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .toggleStyle(.switch)
+            // In Play mode with play-along the whole song plays anyway.
+            if game.hands != .both && !(game.playAlong && game.mode == .play) {
                 Toggle("The piano plays the other hand", isOn: $game.accompanyOtherHand)
                     .toggleStyle(.switch)
             }

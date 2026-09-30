@@ -73,6 +73,12 @@ final class GameController {
     var adaptiveSpeed = true
     /// Play the hand that isn't being practised with the built-in piano.
     var accompanyOtherHand = true
+    /// The built-in piano plays along: in Play mode the whole song, in time with the notes; in Learn mode
+    /// (where the notes wait) each note as it is played right. On unless turned off; remembered.
+    var playAlong: Bool = UserDefaults.standard.object(forKey: GameController.playAlongKey) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(playAlong, forKey: Self.playAlongKey) }
+    }
+    static let playAlongKey = "playAlong"
     /// Speed the next game starts at (the child's level for this song).
     var startSpeed: Double = 0.6
 
@@ -131,6 +137,12 @@ final class GameController {
     @ObservationIgnored private var demoEnded: Set<Int> = []
     @ObservationIgnored private var accompanied: Set<Int> = []
     @ObservationIgnored private var accompanimentEnded: Set<Int> = []
+    /// Learn mode: the notes the piano sounded for the last hit and when, so the microphone hearing them
+    /// isn't taken for the child playing again.
+    @ObservationIgnored private var lastSounded: (pitches: [Int], at: Double)?
+    /// Per key, which sounding of it is current (a later hit on the same key outlives an earlier one's release).
+    @ObservationIgnored private var soundTokens: [Int: Int] = [:]
+    @ObservationIgnored private var soundCounter = 0
 
     init(input: NoteInput, sound: GameSoundPlayer) {
         self.input = input
@@ -195,9 +207,12 @@ final class GameController {
         levelChange = nil
         accompanied = []
         accompanimentEnded = []
+        lastSounded = nil
+        // The whole song playing aloud would be heard by the microphone as the child's notes.
+        input.playbackEchoCancellation = listensForNotes && playsWholeSong
         attachInput()
         startTimer()
-        if accompanyOtherHand && hands != .both { try? sound.start() }
+        if needsSound { try? sound.start() }
 
         countInTask?.cancel()
         countInTask = Task { @MainActor [weak self] in
@@ -224,7 +239,7 @@ final class GameController {
         guard phase == .paused, let engine else { return }
         // The app may have stopped the listener and the piano meanwhile (e.g. it went to the background).
         if listensForNotes && !input.isListening { input.startListening() }
-        if accompanyOtherHand && hands != .both { try? sound.start() }
+        if needsSound { try? sound.start() }
         phase = .playing
         engine.start(at: MonotonicClock.now())
     }
@@ -393,7 +408,8 @@ final class GameController {
         let onset = NoteOnset(time: now, strength: 1, levelDB: -20, features: .template(forPitches: [midi]),
                               midiPitches: [midi])
         engine.handle(onset, at: now)
-        consumeEvents()
+        // The tap already sounded the key.
+        consumeEvents(soundHits: false)
     }
 
     private func attachInput() {
@@ -408,10 +424,23 @@ final class GameController {
 
     private func heard(_ onset: NoteOnset, at clock: Double) {
         guard phase == .playing, let engine else { return }
+        if isEchoOfPlayAlong(onset, at: clock, engine: engine) { return }
         // What the microphone hears shows only as the game's verdict (green or red); guessing which keys
         // it heard lit up overtones and room noise all over the keyboard.
         engine.handle(onset, at: clock)
         consumeEvents()
+    }
+
+    /// Whether the microphone just heard the piano sounding the child's last notes (Learn mode) rather
+    /// than the child: it comes right after, and sounds more like those notes than like the next ones.
+    private func isEchoOfPlayAlong(_ onset: NoteOnset, at clock: Double, engine: GameEngine) -> Bool {
+        guard onset.midiPitches == nil, let sounded = lastSounded else { return false }
+        let since = clock - sounded.at
+        guard since > -0.05, since < 0.4 else { return false }
+        let echo = onset.features.similarity(to: .template(forPitches: sounded.pitches))
+        let next = engine.upcomingNotes.map(\.midi)
+        let expected = next.isEmpty ? 0 : onset.features.similarity(to: .template(forPitches: next))
+        return echo >= expected
     }
 
     // MARK: - Frames
@@ -451,7 +480,9 @@ final class GameController {
         refreshGlows(now: now)
     }
 
-    private func consumeEvents() {
+    /// Takes the engine's events. `soundHits`: in Learn mode with play-along, the piano sounds the notes
+    /// played right (not for taps on the screen, which already sound).
+    private func consumeEvents(soundHits: Bool = true) {
         guard let engine else { return }
         let events = engine.takeEvents()
         guard !events.isEmpty else { return }
@@ -460,10 +491,13 @@ final class GameController {
         score = engine.score
         let previousCombo = combo
         combo = engine.combo
+        var hitNotes: [ChartNote] = []
+        defer { if soundHits { soundPlayedNotes(hitNotes) } }
         for event in events {
             switch event {
             case .hit(let id, let midi, let judgement, let timingError):
                 hitTimes[id] = now
+                if let chart, chart.notes.indices.contains(id) { hitNotes.append(chart.notes[id]) }
                 // On time: green. Early: orange. Late (or, in Learn mode, after a long wait): yellow.
                 let verdict: KeyGlow = judgement == .perfect ? .correct : timingError < 0 ? .early : .late
                 glow(midi, verdict, for: 0.35)
@@ -512,14 +546,48 @@ final class GameController {
         return hints
     }
 
-    /// Plays notes of the hand that isn't practised as the playhead reaches them.
+    /// Play mode with play-along: the piano plays the whole song, in time with the notes.
+    private var playsWholeSong: Bool { playAlong && mode == .play }
+
+    /// Whether a game makes any sound of its own.
+    private var needsSound: Bool { playAlong || (accompanyOtherHand && hands != .both) }
+
+    /// Learn mode with play-along: sounds the notes just played right, for as long as they're written
+    /// (at the speed being played, at most two seconds).
+    private func soundPlayedNotes(_ notes: [ChartNote]) {
+        guard playAlong, mode == .learn, !notes.isEmpty, let chart else { return }
+        try? sound.start()
+        let secondsPerBeat = chart.secondsPerBeat(atSpeed: speed)
+        for note in notes {
+            soundCounter += 1
+            let token = soundCounter
+            soundTokens[note.midi] = token
+            sound.noteOn(note.midi, velocity: Float(note.velocity ?? 0.7))
+            let seconds = max(0.25, min(2, note.duration * secondsPerBeat))
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1e9))
+                guard let self, self.soundTokens[note.midi] == token else { return }
+                self.sound.noteOff(note.midi)
+            }
+        }
+        lastSounded = (notes.map(\.midi), MonotonicClock.now())
+    }
+
+    /// Plays notes with the built-in piano as the playhead reaches them: the whole song in Play mode with
+    /// play-along on, otherwise the hand that isn't practised (if chosen).
     private func accompany(now: Double) {
-        guard accompanyOtherHand, hands != .both, let chart, phase == .playing else { return }
-        for note in chart.notes where !hands.includes(note.hand) {
+        guard let chart, phase == .playing else { return }
+        let wholeSong = playsWholeSong
+        guard wholeSong || (accompanyOtherHand && hands != .both) else { return }
+        for note in chart.notes {
             if note.time > position + 0.05 { break }
+            let practised = hands.includes(note.hand)
+            guard wholeSong || !practised else { continue }
             if !accompanied.contains(note.id) && note.time <= position {
                 accompanied.insert(note.id)
-                if position - note.time < 0.5 { sound.noteOn(note.midi, velocity: Float(note.velocity ?? 0.6) * 0.8) }
+                // The child's own part a little softer than the rest, so their playing stands out.
+                let level = Float(note.velocity ?? 0.6) * (practised ? 0.7 : 0.8)
+                if position - note.time < 0.5 { sound.noteOn(note.midi, velocity: level) }
             }
             // Once only: a later note on the same key would otherwise be cut off every frame.
             if accompanied.contains(note.id) && !accompanimentEnded.contains(note.id) && note.end <= position {

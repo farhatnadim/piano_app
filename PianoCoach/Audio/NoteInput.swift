@@ -38,6 +38,11 @@ final class NoteInput {
     var echoCancellation = false {
         didSet { if oldValue != echoCancellation, isListening, noteSource == .microphone { restartListening() } }
     }
+    /// Set by the game while the piano plays the whole song aloud (Play mode): the microphone then needs
+    /// the app's own piano removed whatever the setting says, or it would count the app's notes as played.
+    var playbackEchoCancellation = false {
+        didSet { if oldValue != playbackEchoCancellation, isListening, noteSource == .microphone { restartListening() } }
+    }
 
     /// Receives every note or chord heard (microphone or MIDI) with its `MonotonicClock` time.
     @ObservationIgnored var noteObserver: ((NoteOnset, Double) -> Void)?
@@ -83,7 +88,7 @@ final class NoteInput {
                 let worker = self.analysis
                 self.audio.setChunkHandler { chunk in worker.process(chunk) }
                 do {
-                    try self.audio.start(voiceProcessing: self.echoCancellation)
+                    try self.audio.start(voiceProcessing: self.echoCancellation || self.playbackEchoCancellation)
                     self.isListening = true
                 } catch {
                     self.listeningError = "Couldn't start the microphone: \(error.localizedDescription)"
