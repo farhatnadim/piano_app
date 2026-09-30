@@ -38,6 +38,39 @@ final class GameEngineTests: XCTestCase {
         return events
     }
 
+    /// Runs a game against a player who keeps their own steady pace (a fraction of the song's tempo) from the
+    /// moment the first chord reaches the line, whatever the notes do; `pitches` says what they play for
+    /// each chord (the chord's own notes by default).
+    @discardableResult
+    private func simulateOwnPace(_ engine: GameEngine, pace: Double, seconds: Double,
+                                 pitches: ((Int, [ChartNote]) -> [Int])? = nil) -> [GameEvent] {
+        var events: [GameEvent] = []
+        var clock = 100.0
+        engine.start(at: clock)
+        let chords = chart.chords.map { $0.filter { engine.configuration.hands.includes($0.hand) } }.filter { !$0.isEmpty }
+        let secondsPerBeat = chart.secondsPerBeat(atSpeed: pace)
+        var begin: Double?
+        var next = 0
+        let end = clock + seconds
+        while clock < end && !engine.isFinished {
+            clock += 1.0 / 60
+            engine.update(to: clock)
+            if begin == nil, engine.position >= chords[0][0].time - 1e-9 { begin = clock }
+            if let begin, next < chords.count,
+               clock >= begin + (chords[next][0].time - chords[0][0].time) * secondsPerBeat {
+                let notes = chords[next]
+                engine.handle(midiOnset(pitches?(next, notes) ?? notes.map(\.midi), at: clock), at: clock)
+                next += 1
+            }
+            events += engine.takeEvents()
+        }
+        return events
+    }
+
+    private func restarts(in events: [GameEvent]) -> [Double] {
+        events.compactMap { if case .measureRestarted(let beat) = $0 { return beat } else { return nil } }
+    }
+
     func testLearnModeWaitsAtTheLineUntilPlayed() {
         var config = GameConfiguration()
         config.mode = .learn
@@ -100,33 +133,138 @@ final class GameEngineTests: XCTestCase {
         XCTAssertTrue(result.completed)
     }
 
-    func testPlayModePlayerWhoStopsMissesNotesAndGameSlowsDown() {
+    func testPlayModeWaitsForTheFirstNote() {
         var config = GameConfiguration()
         config.mode = .play
         config.startSpeed = 1
         let engine = GameEngine(chart: chart, configuration: config)
+        simulate(engine, seconds: 10, reaction: { _ in nil })
+        XCTAssertTrue(engine.isWaiting)
+        XCTAssertEqual(engine.position, chart.notes[0].time, accuracy: 1e-9)
+        XCTAssertEqual(engine.stats.missed, 0)
+    }
+
+    func testPlayModeStopsWhenThePlayerStopsAndGoesOnWhenTheyPlayAgain() {
+        var config = GameConfiguration()
+        config.mode = .play
+        config.startSpeed = 1
+        config.adaptiveSpeed = false
+        let engine = GameEngine(chart: chart, configuration: config)
         // Plays the first 10 chords, then stops.
-        let events = simulate(engine, seconds: 60, reaction: { $0 < 10 ? 0.05 : nil })
+        simulate(engine, seconds: 30, reaction: { $0 < 10 ? 0.02 : nil })
+        XCTAssertFalse(engine.isFinished)
+        XCTAssertTrue(engine.isWaiting, "the notes wait at the next chord")
+        XCTAssertEqual(engine.stats.missed, 0, "nothing is missed while the player isn't playing")
+        let waitingAt = engine.position
+        XCTAssertEqual(engine.upcomingNotes.first?.time ?? -1, waitingAt, accuracy: 1e-9)
+        // Playing that chord again sets the notes going.
+        var clock = 200.0
+        engine.start(at: clock)
+        engine.handle(midiOnset(engine.upcomingNotes.map(\.midi), at: clock), at: clock)
+        XCTAssertFalse(engine.isWaiting)
+        clock += 0.5
+        engine.update(to: clock)
+        XCTAssertGreaterThan(engine.position, waitingAt)
+    }
+
+    func testPlayModeWithoutWaitingKeepsGoingAndMisses() {
+        var config = GameConfiguration()
+        config.mode = .play
+        config.startSpeed = 1
+        config.adaptiveSpeed = false
+        config.waitsWhenSilent = false
+        config.mistakesAllowedPerMeasure = nil
+        let engine = GameEngine(chart: chart, configuration: config)
+        simulate(engine, seconds: 60, reaction: { $0 < 10 ? 0.05 : nil })
+        XCTAssertTrue(engine.isFinished)
         XCTAssertGreaterThan(engine.result.missed, 10)
         XCTAssertEqual(engine.combo, 0)
-        XCTAssertTrue(events.contains { if case .speedChanged(let from, let to) = $0 { return to < from } else { return false } })
-        XCTAssertLessThan(engine.result.endSpeed, 1)
         XCTAssertLessThan(engine.result.stars, 3)
     }
 
-    func testLearnModeSpeedsUpForAQuickPlayerAndSlowsDownForASlowOne() {
+    func testFollowMySpeedSlowsDownToAPlayerWhoPlaysMoreSlowly() {
+        var config = GameConfiguration()
+        config.mode = .play
+        config.startSpeed = 0.8
+        let engine = GameEngine(chart: chart, configuration: config)
+        let events = simulateOwnPace(engine, pace: 0.55, seconds: 30)
+        XCTAssertEqual(engine.targetSpeed, 0.55, accuracy: 0.07)
+        XCTAssertLessThanOrEqual(engine.stats.missed, 1)
+        XCTAssertEqual(restarts(in: events), [])
+        XCTAssertTrue(events.contains { if case .speedChanged(let from, let to) = $0 { return to < from } else { return false } })
+    }
+
+    func testFollowMySpeedSpeedsUpForAPlayerWhoPlaysFaster() {
+        var config = GameConfiguration()
+        config.mode = .play
+        config.startSpeed = 0.6
+        let engine = GameEngine(chart: chart, configuration: config)
+        let events = simulateOwnPace(engine, pace: 0.8, seconds: 25)
+        XCTAssertEqual(engine.targetSpeed, 0.8, accuracy: 0.08)
+        XCTAssertLessThanOrEqual(engine.stats.missed, 1)
+        XCTAssertEqual(restarts(in: events), [])
+    }
+
+    func testLearnModeFollowsTheSpeedOfAQuickPlayerAndOfASlowOne() {
         var config = GameConfiguration()
         config.mode = .learn
         config.startSpeed = 0.6
+        // Plays ahead of the notes: they speed up.
         let quick = GameEngine(chart: chart, configuration: config)
-        simulate(quick, seconds: 120, reaction: { _ in 0.05 })
-        XCTAssertGreaterThan(quick.result.endSpeed, 0.6)
+        simulateOwnPace(quick, pace: 0.8, seconds: 40)
+        XCTAssertGreaterThan(quick.result.endSpeed, 0.7)
+        XCTAssertEqual(quick.result.wrongNotes, 0)
 
+        // Much slower than the notes: they slow down (short reactions to a waiting note don't count).
         let slow = GameEngine(chart: chart, configuration: config)
-        simulate(slow, seconds: 200, reaction: { _ in 1.5 })
-        XCTAssertLessThan(slow.result.endSpeed, 0.6)
+        simulateOwnPace(slow, pace: 0.35, seconds: 120)
+        XCTAssertLessThan(slow.result.endSpeed, 0.5)
         XCTAssertTrue(slow.isFinished)
         XCTAssertEqual(slow.result.missed, 0, "learn mode never misses")
+
+        // Waits for each note and plays it a moment after it arrives: the speed stays put.
+        let steady = GameEngine(chart: chart, configuration: config)
+        simulate(steady, seconds: 120, reaction: { _ in 0.3 })
+        XCTAssertEqual(steady.result.endSpeed, 0.6, accuracy: 0.06)
+    }
+
+    func testPlayModeStartsAMeasureAgainAfterMoreThanThreeMisses() {
+        var config = GameConfiguration()
+        config.mode = .play
+        config.startSpeed = 1
+        config.adaptiveSpeed = false
+        let engine = GameEngine(chart: chart, configuration: config)
+        // Plays a wrong key for every chord (once): measure 1 has 5 notes, the 4th miss (in its 3rd chord)
+        // starts it again.
+        let events = simulate(engine, seconds: 10, reaction: { _ in 0.02 }, play: { _, clock in self.midiOnset([30], at: clock) })
+        XCTAssertEqual(restarts(in: events), [0])
+        XCTAssertEqual(engine.statuses[0], .pending)
+        XCTAssertEqual(engine.statuses[1], .pending)
+        XCTAssertEqual(engine.combo, 0)
+        // Then the notes wait at the start of the measure for the player to begin again.
+        XCTAssertTrue(engine.isWaiting)
+        XCTAssertEqual(engine.position, 0, accuracy: 1e-9)
+        // The misses still count against the game.
+        XCTAssertEqual(engine.result.missed, 4)
+    }
+
+    func testLearnModeStartsAMeasureAgainAfterMoreThanThreeWrongNotes() {
+        var config = GameConfiguration()
+        config.mode = .learn
+        config.adaptiveSpeed = false
+        let engine = GameEngine(chart: chart, configuration: config)
+        engine.start(at: 0)
+        var clock = 0.0
+        while !engine.isWaiting { clock += 1.0 / 60; engine.update(to: clock) }
+        engine.handle(midiOnset([48, 64], at: clock), at: clock)      // measure 1, beat 1: right
+        while !engine.isWaiting { clock += 1.0 / 60; engine.update(to: clock) }
+        for _ in 0..<3 { engine.handle(midiOnset([30], at: clock), at: clock) }
+        XCTAssertEqual(restarts(in: engine.takeEvents()), [], "three wrong notes are allowed")
+        engine.handle(midiOnset([30], at: clock), at: clock)
+        XCTAssertEqual(restarts(in: engine.takeEvents()), [0])
+        XCTAssertEqual(engine.statuses[0], .pending, "the measure's first chord is to play again")
+        XCTAssertEqual(engine.upcomingNotes.map(\.midi), [48, 64])
+        XCTAssertLessThan(engine.position, 0)
     }
 
     func testRightHandOnlyDoesNotRequireOrPunishLeftHand() {
@@ -254,5 +392,55 @@ final class FeatureVectorPitchednessTests: XCTestCase {
         engine.handle(NoteOnset(time: 0, strength: 1, levelDB: -20, features: .template(forPitches: [72 + 7])),
                       at: configuration.leadInSeconds + 0.1)
         XCTAssertEqual(engine.stats.wrongNotes, 1, "a clear note that isn't the one asked for is wrong")
+    }
+}
+
+final class PaceFollowerTests: XCTestCase {
+    /// Chords one beat apart at 60 BPM (a second each at full speed), played every `interval` seconds.
+    private func feed(_ follower: inout PaceFollower, intervals: [Double]) -> Double? {
+        var clock = 0.0
+        var result = follower.played(beat: 0, at: clock, secondsPerBeat: 1)
+        for (i, interval) in intervals.enumerated() {
+            clock += interval
+            result = follower.played(beat: Double(i + 1), at: clock, secondsPerBeat: 1) ?? result
+        }
+        return result
+    }
+
+    func testFollowsTheMedianPaceDespiteOneHesitation() {
+        var follower = PaceFollower()
+        // Half speed (two seconds a beat), with one long hesitation.
+        XCTAssertEqual(feed(&follower, intervals: [2, 2, 6, 2, 2]) ?? 0, 0.5, accuracy: 0.01)
+    }
+
+    func testNeedsTwoStretchesAndJoinsShortOnes() {
+        var follower = PaceFollower()
+        XCTAssertNil(follower.played(beat: 0, at: 0, secondsPerBeat: 1))
+        XCTAssertNil(follower.played(beat: 1, at: 1.25, secondsPerBeat: 1))
+        // A quarter of a beat is too short to measure alone: joined with the next one.
+        XCTAssertNil(follower.played(beat: 1.25, at: 1.5, secondsPerBeat: 1))
+        XCTAssertEqual(follower.played(beat: 2, at: 2.5, secondsPerBeat: 1) ?? 0, 0.8, accuracy: 0.01)
+        XCTAssertEqual(follower.pace ?? 0, 0.8, accuracy: 0.01)
+    }
+
+    func testExcusedTimeAndStopsDontCount() {
+        var follower = PaceFollower()
+        _ = follower.played(beat: 0, at: 0, secondsPerBeat: 1)
+        follower.excuse(0.5)
+        _ = follower.played(beat: 1, at: 1.5, secondsPerBeat: 1)       // 1 s of playing: full speed
+        follower.interrupt()                                            // stopped for a while
+        _ = follower.played(beat: 2, at: 30, secondsPerBeat: 1)
+        XCTAssertEqual(follower.played(beat: 3, at: 31, secondsPerBeat: 1) ?? 0, 1, accuracy: 0.01)
+    }
+
+    func testLeansSlowerWhileThePlayerIsBehind() {
+        var follower = PaceFollower()
+        var clock = 0.0
+        var speed: Double?
+        for beat in 0...4 {
+            speed = follower.played(beat: Double(beat), at: clock, secondsPerBeat: 1, lateness: 0.25) ?? speed
+            clock += 2
+        }
+        XCTAssertEqual(speed ?? 0, 0.45, accuracy: 0.01, "half speed, 10 % slower while a quarter second behind")
     }
 }

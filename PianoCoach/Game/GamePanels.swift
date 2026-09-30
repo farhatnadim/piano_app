@@ -399,9 +399,20 @@ struct StartPanel: View {
                 Image(systemName: "hare.fill")
                     .foregroundStyle(.secondary)
             }
-            Toggle("Follow my speed (faster when it goes well, slower when it's hard)", isOn: $game.adaptiveSpeed)
-                .toggleStyle(.switch)
-                .font(.subheadline)
+            Toggle(isOn: $game.adaptiveSpeed) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Follow my speed")
+                    Text("The song goes at the pace you play")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .toggleStyle(.switch)
+            .font(.subheadline)
+            Text("The notes wait when you stop playing. After more than 3 mistakes in a measure, it starts again.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

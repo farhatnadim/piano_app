@@ -16,7 +16,7 @@ struct FallingNotesView: View {
         let scene = FallingNotesScene(
             chart: chart, layout: layout, position: game.position, speed: game.speed, statuses: game.statuses,
             hitTimes: game.hitTimes, now: game.frameTime, upcomingKeys: game.upcomingKeys,
-            isWaiting: game.isWaiting && game.mode == .learn && game.phase == .playing,
+            isWaiting: game.isWaiting && game.phase == .playing,
             showLetters: game.showLetters, isDark: colorScheme == .dark)
         Canvas { context, size in
             scene.draw(in: &context, size: size)
@@ -186,13 +186,14 @@ struct FallingNotesScene {
     }
 }
 
-/// "Play the glowing keys!": shown while Learn mode waits for the child.
+/// "Play the glowing keys!": shown while the notes wait for the child (every chord in Learn mode; in Play
+/// mode when they stopped playing).
 struct WaitingHint: View {
     let game: GameController
     var text = "Play the glowing keys!"
 
     var body: some View {
-        let show = game.isWaiting && game.mode == .learn && game.phase == .playing
+        let show = game.isWaiting && game.phase == .playing
         ZStack {
             if show {
                 Label(text, systemImage: "hand.point.down.fill")

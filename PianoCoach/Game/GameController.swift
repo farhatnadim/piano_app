@@ -139,6 +139,8 @@ final class GameController {
     @ObservationIgnored private var demoEnded: Set<Int> = []
     @ObservationIgnored private var accompanied: Set<Int> = []
     @ObservationIgnored private var accompanimentEnded: Set<Int> = []
+    /// Where the playhead was when the accompaniment last looked (to notice it going back).
+    @ObservationIgnored private var accompaniedUpTo: Double = -.infinity
     /// Learn mode: the notes the piano sounded for the last hit and when, so the microphone hearing them
     /// isn't taken for the child playing again.
     @ObservationIgnored private var lastSounded: (pitches: [Int], at: Double)?
@@ -210,6 +212,7 @@ final class GameController {
         levelChange = nil
         accompanied = []
         accompanimentEnded = []
+        accompaniedUpTo = -.infinity
         lastSounded = nil
         // The whole song playing aloud would be heard by the microphone as the child's notes.
         input.playbackEchoCancellation = listensForNotes && playsWholeSong
@@ -509,7 +512,13 @@ final class GameController {
             case .wrongNote(let midi):
                 if let midi { glow(midi, .wrong, for: 0.4) }
             case .speedChanged(let from, let to):
-                showCheer(to > from ? "Great! A bit faster" : "Let's slow down a little")
+                showCheer(to > from ? "Speeding up with you!" : "Slowing down with you")
+            case .measureRestarted(let fromBeat):
+                sound.allNotesOff()
+                if let chart {
+                    for note in chart.notes where note.time >= fromBeat - 1e-9 { hitTimes[note.id] = nil }
+                }
+                showCheer("Let's try that measure again!")
             case .finished:
                 finish()
             }
@@ -582,11 +591,20 @@ final class GameController {
         guard let chart, phase == .playing else { return }
         let wholeSong = playsWholeSong
         guard wholeSong || (accompanyOtherHand && hands != .both) else { return }
+        // The notes went back (a measure starting over, or waiting at a chord the child stopped at): what
+        // comes again is played again.
+        if position < accompaniedUpTo - 1e-6 {
+            let back = position
+            accompanied = accompanied.filter { chart.notes[$0].time < back }
+            accompanimentEnded = accompanimentEnded.filter { chart.notes[$0].time < back }
+        }
+        accompaniedUpTo = position
         for note in chart.notes {
             if note.time > position + 0.05 { break }
             let practised = hands.includes(note.hand)
             guard wholeSong || !practised else { continue }
-            if !accompanied.contains(note.id) && note.time <= position {
+            // Not while the notes wait at it: the chord sounds once the child plays it and they move on.
+            if !accompanied.contains(note.id) && note.time < position {
                 accompanied.insert(note.id)
                 // The child's own part a little softer than the rest, so their playing stands out.
                 let level = Float(note.velocity ?? 0.6) * (practised ? 0.7 : 0.8)

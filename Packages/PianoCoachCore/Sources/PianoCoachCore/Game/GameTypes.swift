@@ -70,6 +70,8 @@ public enum GameEvent: Equatable, Sendable {
     /// A key that wasn't expected (MIDI), or a sound that matched nothing (microphone; `midi` is the best guess or nil).
     case wrongNote(midi: Int?)
     case speedChanged(from: Double, to: Double)
+    /// Too many mistakes in a measure: the game went back to the start of it (`fromBeat`) to try it again.
+    case measureRestarted(fromBeat: Double)
     case finished
 }
 
@@ -79,8 +81,25 @@ public struct GameConfiguration: Equatable, Sendable {
     public var hands: HandSelection = .both
     /// Speed to start at, as a fraction of the song's tempo.
     public var startSpeed: Double = 0.6
-    /// Follow the player: slow down when they struggle, speed up when they're doing well.
+    /// Follow the player: the speed becomes the pace they actually play at (see `PaceFollower`), and in
+    /// Play mode a chord still counts when played up to `followLateWindow` late, so a player going slower
+    /// than the notes is heard (and followed) rather than missed.
     public var adaptiveSpeed = true
+    /// Play mode, following the player: how late (or early) a chord may still be played, in seconds.
+    public var followLateWindow: Double = 0.6
+    /// Learn mode, following the player: how long (seconds) the player may take to react to a chord that
+    /// stopped at the line without it counting as playing slowly. A longer stop than `stopAfter` means
+    /// they paused, not that they play slowly.
+    public var reactionAllowance: Double = 0.4
+    public var stopAfter: Double = 3
+    /// Play mode: when the player plays nothing at all, the notes stop at the next chord and wait (as in
+    /// Learn mode) until they play again.
+    public var waitsWhenSilent = true
+    /// More mistakes than this in one measure — notes missed in Play mode, wrong notes in Learn mode —
+    /// start the measure again. Nil never restarts.
+    public var mistakesAllowedPerMeasure: Int? = 3
+    /// Seconds of lead-in before a restarted measure.
+    public var restartLeadSeconds: Double = 1.5
     public var minSpeed: Double = 0.3
     public var maxSpeed: Double = 1.2
     /// Timing error (seconds) that still counts as perfect / good.
