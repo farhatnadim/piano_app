@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import ImageIO
 import PianoCoachCore
 #if os(iOS)
 import ReplayKit
@@ -24,14 +25,23 @@ final class AppAudioCapture: NSObject, @unchecked Sendable {
         var errorDescription: String? { "Recording the app's sound isn't available here." }
     }
 
-    private let sink: @Sendable ([Float], Double) -> Void
+    /// Samples, their rate and the `MonotonicClock` time of the first one.
+    typealias AudioSink = @Sendable ([Float], Double, Double) -> Void
+    /// A screen frame, how to turn it upright, and its `MonotonicClock` time.
+    typealias VideoSink = @Sendable (CVPixelBuffer, CGImagePropertyOrientation, Double) -> Void
+
+    private let sink: AudioSink
+    private let videoSink: VideoSink?
     #if os(macOS)
     private var stream: SCStream?
     private let queue = DispatchQueue(label: "PianoCoach.AppAudioCapture")
+    private let videoQueue = DispatchQueue(label: "PianoCoach.AppAudioCapture.video")
     #endif
 
-    init(sink: @escaping @Sendable ([Float], Double) -> Void) {
+    /// `videoSink`, when given, also receives the screen's frames (to read a tutorial video's keys).
+    init(sink: @escaping AudioSink, videoSink: VideoSink? = nil) {
         self.sink = sink
+        self.videoSink = videoSink
     }
 
     #if os(iOS)
@@ -39,7 +49,7 @@ final class AppAudioCapture: NSObject, @unchecked Sendable {
         let recorder = RPScreenRecorder.shared()
         guard recorder.isAvailable else { throw CaptureError.unavailable }
         recorder.isMicrophoneEnabled = false
-        try await recorder.startCapture(handler: Self.makeHandler(sink: sink))
+        try await recorder.startCapture(handler: Self.makeHandler(sink: sink, videoSink: videoSink))
     }
 
     func stop() async {
@@ -49,12 +59,25 @@ final class AppAudioCapture: NSObject, @unchecked Sendable {
     }
 
     /// Built in a static (non-isolated) context: ReplayKit calls it on its own queue.
-    private static func makeHandler(sink: @escaping @Sendable ([Float], Double) -> Void)
+    private static func makeHandler(sink: @escaping AudioSink, videoSink: VideoSink?)
         -> @Sendable (CMSampleBuffer, RPSampleBufferType, Error?) -> Void {
         { sampleBuffer, type, error in
-            guard error == nil, type == .audioApp,
-                  let (samples, rate) = SampleBufferAudio.monoSamples(sampleBuffer) else { return }
-            sink(samples, rate)
+            guard error == nil else { return }
+            switch type {
+            case .audioApp:
+                guard let (samples, rate) = SampleBufferAudio.monoSamples(sampleBuffer) else { return }
+                sink(samples, rate, sampleBuffer.hostSeconds)
+            case .video:
+                guard let videoSink, let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+                var orientation = CGImagePropertyOrientation.up
+                if let raw = CMGetAttachment(sampleBuffer, key: RPVideoSampleOrientationKey as CFString, attachmentModeOut: nil)
+                    as? NSNumber, let value = CGImagePropertyOrientation(rawValue: raw.uint32Value) {
+                    orientation = value
+                }
+                videoSink(pixels, orientation, sampleBuffer.hostSeconds)
+            default:
+                break
+            }
         }
     }
     #elseif os(macOS)
@@ -67,12 +90,21 @@ final class AppAudioCapture: NSObject, @unchecked Sendable {
         configuration.excludesCurrentProcessAudio = false
         configuration.sampleRate = 48_000
         configuration.channelCount = 1
-        // Only the sound is used; keep the (required) video tiny and slow.
-        configuration.width = 2
-        configuration.height = 2
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 2)
+        if videoSink != nil {
+            // Half the display's size is plenty to see which keys light up.
+            configuration.width = max(2, display.width)
+            configuration.height = max(2, display.height)
+            configuration.pixelFormat = kCVPixelFormatType_32BGRA
+            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+        } else {
+            // Only the sound is used; keep the (required) video tiny and slow.
+            configuration.width = 2
+            configuration.height = 2
+            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 2)
+        }
         let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
+        if videoSink != nil { try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: videoQueue) }
         try await stream.startCapture()
         self.stream = stream
     }
@@ -88,8 +120,16 @@ final class AppAudioCapture: NSObject, @unchecked Sendable {
 #if os(macOS)
 extension AppAudioCapture: SCStreamOutput {
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .audio, let (samples, rate) = SampleBufferAudio.monoSamples(sampleBuffer) else { return }
-        sink(samples, rate)
+        switch type {
+        case .audio:
+            guard let (samples, rate) = SampleBufferAudio.monoSamples(sampleBuffer) else { return }
+            sink(samples, rate, sampleBuffer.hostSeconds)
+        case .screen:
+            guard let videoSink, let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+            videoSink(pixels, .up, sampleBuffer.hostSeconds)
+        default:
+            break
+        }
     }
 }
 #endif

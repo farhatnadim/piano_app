@@ -31,6 +31,8 @@ final class SongLearner {
     private(set) var level: Float = 0
     /// True when the microphone hears the video (recording the sound directly wasn't possible).
     private(set) var usesMicrophone = false
+    /// True when the last song's notes were read off the video's keyboard rather than heard.
+    private(set) var readFromVideo = false
 
     var isListening: Bool { phase == .listening || phase == .starting }
     var isWorking: Bool {
@@ -46,6 +48,8 @@ final class SongLearner {
     private let player: YouTubePlayerController
     private let audio: AudioHub
     private let collector = SampleCollector(maxSeconds: SongLearner.maxSeconds)
+    /// Reads the notes off the video's keyboard, when it shows one, while its sound is recorded.
+    private let videoKeys = VideoKeyReader()
     @ObservationIgnored private var capture: AppAudioCapture?
     @ObservationIgnored private var title = ""
     @ObservationIgnored private var pieceID: UUID?
@@ -128,7 +132,16 @@ final class SongLearner {
                 return
             }
             Self.saveRecording(recording.samples, sampleRate: recording.sampleRate, title: self.title)
-            self.transcribe(recording.samples, sampleRate: recording.sampleRate, origin: .video)
+            // The keys the video lit up, in seconds of the recording.
+            var seen: SeenKeys?
+            let read = self.videoKeys.notes()
+            if read.foundKeyboard, let start = recording.startTime {
+                let notes = read.notes.map {
+                    KeyboardVideoReader.VideoNote(midi: $0.midi, start: $0.start - start, end: $0.end - start, hue: $0.hue)
+                }
+                seen = SeenKeys(notes: notes, fullPiano: read.fullPiano)
+            }
+            self.transcribe(recording.samples, sampleRate: recording.sampleRate, origin: .video, seen: seen)
         }
     }
 
@@ -163,7 +176,13 @@ final class SongLearner {
 
     private func startDirectCapture(generation gen: Int) async -> Bool {
         let collector = collector
-        let capture = AppAudioCapture { samples, rate in collector.append(samples, sampleRate: rate) }
+        let keys = videoKeys
+        keys.reset()
+        let capture = AppAudioCapture(sink: { samples, rate, time in
+            collector.append(samples, sampleRate: rate, startTime: time)
+        }, videoSink: { pixels, orientation, time in
+            keys.append(pixels, orientation: orientation, time: time)
+        })
         do {
             try await capture.start()
             // Cancelled while the system was asking: don't leave this recording running.
@@ -182,7 +201,7 @@ final class SongLearner {
         // Cancelled while asking for permission: don't feed a newer session (or none) from this one.
         guard await Permissions.requestMicrophone(), gen == generation else { return false }
         let collector = collector
-        audio.setChunkHandler { chunk in collector.append(chunk.samples, sampleRate: chunk.sampleRate) }
+        audio.setChunkHandler { chunk in collector.append(chunk.samples, sampleRate: chunk.sampleRate, startTime: chunk.startTime) }
         do {
             try audio.start(voiceProcessing: false)
             usesMicrophone = true
@@ -213,6 +232,7 @@ final class SongLearner {
                 try? await Task.sleep(nanoseconds: 250_000_000)
                 guard let self, gen == self.generation, self.phase == .listening else { return }
                 let stats = self.collector.stats()
+                self.videoKeys.setSearchRect(self.player.rectOnScreen)
                 self.heardSeconds = stats.seconds
                 self.level = min(1, stats.recentPeak * 2)
                 let now = MonotonicClock.now()
@@ -357,7 +377,13 @@ final class SongLearner {
         }
     }
 
-    private func transcribe(_ samples: [Float], sampleRate: Double, origin: NotesOrigin) {
+    /// Notes read off the video's keyboard (seconds of the recording).
+    struct SeenKeys: Sendable {
+        var notes: [KeyboardVideoReader.VideoNote]
+        var fullPiano: Bool
+    }
+
+    private func transcribe(_ samples: [Float], sampleRate: Double, origin: NotesOrigin, seen: SeenKeys? = nil) {
         guard let pieceID else { return }
         let gen = generation
         let title = self.title
@@ -369,7 +395,7 @@ final class SongLearner {
             }
         }
         let job = Task.detached(priority: .userInitiated) {
-            Result { try Self.makeSong(samples: samples, sampleRate: sampleRate, title: title, progress: report) }
+            Result { try Self.makeSong(samples: samples, sampleRate: sampleRate, title: title, seen: seen, progress: report) }
         }
         work = Task { [weak self] in
             // Cancelling `work` (see `cancel`) stops the pipeline between model windows.
@@ -379,6 +405,7 @@ final class SongLearner {
             switch result {
             case .success(var song):
                 self.phase = .idle
+                self.readFromVideo = song.fromVideoKeys
                 // Beat 0 in seconds of the video (the recording ran ahead of the video by `recordingLead`).
                 if origin == .video, let lead = self.recordingLead {
                     song.timeOfBeatZero -= lead
@@ -395,7 +422,7 @@ final class SongLearner {
     }
 
     /// The whole pipeline, off the main thread: recording -> model -> notes -> arranged song.
-    private nonisolated static func makeSong(samples: [Float], sampleRate: Double, title: String,
+    private nonisolated static func makeSong(samples: [Float], sampleRate: Double, title: String, seen: SeenKeys?,
                                              progress: @escaping @Sendable (Double) -> Void) throws -> ArrangedSong {
         guard !samples.isEmpty else { throw LearnError.noSound }
         let model = try loadModel()
@@ -405,7 +432,21 @@ final class SongLearner {
             return try model.run(window: window)
         }
         try Task.checkCancellation()
-        guard var song = SongArranger.arrange(notes, title: title) else { throw LearnError.noNotes }
+        // A tutorial video's lit keys are the surest notes: use them, lined up with the sound, when there
+        // are enough of them; otherwise what was heard.
+        var chosen = notes
+        var fromVideo = false
+        if let seen {
+            let video = seen.notes.map {
+                KeyboardVideoReader.VideoNote(midi: $0.midi, start: $0.start - trimmed, end: $0.end - trimmed, hue: $0.hue)
+            }
+            if let aligned = VideoNoteAligner.align(video: video, heard: notes, octaveKnown: seen.fullPiano) {
+                chosen = aligned
+                fromVideo = true
+            }
+        }
+        guard var song = SongArranger.arrange(chosen, title: title) else { throw LearnError.noNotes }
+        song.fromVideoKeys = fromVideo
         // Note times count from the first sound; put beat 0 back into seconds of the whole recording.
         song.timeOfBeatZero += trimmed
         progress(1)
@@ -440,6 +481,8 @@ final class SampleCollector: @unchecked Sendable {
     private var sampleRate: Double = 0
     private var peak: Float = 0
     private var recentPeak: Float = 0
+    /// `MonotonicClock` time of the first sample.
+    private var startTime: Double?
 
     init(maxSeconds: Double) {
         self.maxSeconds = maxSeconds
@@ -451,14 +494,16 @@ final class SampleCollector: @unchecked Sendable {
             sampleRate = 0
             peak = 0
             recentPeak = 0
+            startTime = nil
         }
     }
 
-    func append(_ chunk: [Float], sampleRate rate: Double) {
+    func append(_ chunk: [Float], sampleRate rate: Double, startTime time: Double? = nil) {
         guard !chunk.isEmpty, rate > 0 else { return }
         lock.withLock {
             if sampleRate == 0 {
                 sampleRate = rate
+                startTime = time
                 samples.reserveCapacity(Int(rate * 60 * 5))
             }
             guard Double(samples.count) < maxSeconds * sampleRate else { return }
@@ -478,8 +523,8 @@ final class SampleCollector: @unchecked Sendable {
         }
     }
 
-    func snapshot() -> (samples: [Float], sampleRate: Double) {
-        lock.withLock { (samples, sampleRate) }
+    func snapshot() -> (samples: [Float], sampleRate: Double, startTime: Double?) {
+        lock.withLock { (samples, sampleRate, startTime) }
     }
 
     private static func interpolate(_ chunk: [Float], from source: Double, to target: Double) -> [Float] {

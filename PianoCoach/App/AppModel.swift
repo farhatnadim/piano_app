@@ -290,7 +290,8 @@ final class AppModel {
         player.pause()
         isRelearning = false
         loadNotes(for: piece)
-        showToast("Your song is ready!")
+        showToast(song.fromVideoKeys ? "Your song is ready! I read the notes off the video's keyboard."
+                                     : "Your song is ready!")
     }
 
     /// Uses a MIDI or MusicXML file as the open song's notes.

@@ -21,6 +21,8 @@ public struct ArrangedSong: Sendable {
     /// 0...1: how well the notes fit the beat grid, and how clearly the key won.
     public var tempoConfidence: Double
     public var keyConfidence: Double
+    /// True when the notes were read off a tutorial video's keyboard rather than heard (set by the caller).
+    public var fromVideoKeys = false
 
     /// Where `beat` falls in the recording, in seconds.
     public func seconds(atBeat beat: Double) -> Double { timeOfBeatZero + beat * 60 / tempoBPM }

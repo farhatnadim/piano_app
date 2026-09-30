@@ -266,3 +266,27 @@ private final class NavigationHandler: NSObject, WKNavigationDelegate, WKUIDeleg
         #endif
     }
 }
+
+extension YouTubePlayerController {
+    /// Where the video is on the screen, as fractions (0...1) of the screen from its top-left corner, with
+    /// a little margin; nil when it isn't on screen. Screen recordings use it to find the video.
+    var rectOnScreen: CGRect? {
+        #if os(iOS)
+        guard let window = webView.window, window.bounds.width > 0, window.bounds.height > 0 else { return nil }
+        let frame = webView.convert(webView.bounds, to: nil)
+        let screen = window.bounds
+        let rect = CGRect(x: frame.minX / screen.width, y: frame.minY / screen.height,
+                          width: frame.width / screen.width, height: frame.height / screen.height)
+        #else
+        guard let window = webView.window, let screen = window.screen else { return nil }
+        let inWindow = webView.convert(webView.bounds, to: nil)
+        let onScreen = window.convertToScreen(inWindow)
+        let display = screen.frame
+        let rect = CGRect(x: (onScreen.minX - display.minX) / display.width,
+                          y: (display.maxY - onScreen.maxY) / display.height,
+                          width: onScreen.width / display.width, height: onScreen.height / display.height)
+        #endif
+        let padded = rect.insetBy(dx: -0.02, dy: -0.02).intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+        return padded.isNull || padded.width < 0.05 ? nil : padded
+    }
+}
