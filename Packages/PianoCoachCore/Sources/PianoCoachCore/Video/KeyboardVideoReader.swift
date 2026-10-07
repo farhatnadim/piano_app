@@ -313,7 +313,10 @@ public final class KeyboardVideoReader {
             if groups[i].count != (isThree ? 3 : 2) { return nil }
         }
         // A white key: an octave (five black keys on) is seven of them.
-        var octaveSpans = (0..<max(0, centers.count - 5)).map { (centers[$0 + 5] - centers[$0]) / 7 }.sorted()
+        var octaveSpans: [Double] = (0..<max(0, centers.count - 5)).map { (i: Int) -> Double in
+            (centers[i + 5] - centers[i]) / 7
+        }
+        octaveSpans.sort()
         if octaveSpans.isEmpty { octaveSpans = [small] }
         let whiteWidth = octaveSpans[octaveSpans.count / 2]
         // Place the octave: the full piano has 36 black keys, A♯0 first; otherwise centre near middle C.

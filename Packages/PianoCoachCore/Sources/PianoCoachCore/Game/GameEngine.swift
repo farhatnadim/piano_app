@@ -187,6 +187,26 @@ public final class GameEngine {
         return chords[nextChord].filter { statuses[$0] == .pending }.map { chart.notes[$0] }
     }
 
+    /// The keys worth listening for through the microphone now: the next chord in Learn mode; in Play mode the
+    /// notes within the timing window around the playhead, and a little more (a note is heard a moment after
+    /// it is struck).
+    public var listeningPitches: Set<Int> {
+        guard nextChord < chords.count else { return [] }
+        guard configuration.mode == .play else {
+            return Set(chords[nextChord].filter { statuses[$0] == .pending }.map { chart.notes[$0].midi })
+        }
+        let reach = (lateWindow + 0.2) * beatsPerSecond
+        var pitches = Set<Int>()
+        var c = nextChord
+        while c < chords.count, chartTime(ofChord: c) <= position + reach {
+            if chartTime(ofChord: c) >= position - reach {
+                for note in chords[c] where statuses[note] == .pending { pitches.insert(chart.notes[note].midi) }
+            }
+            c += 1
+        }
+        return pitches
+    }
+
     /// Notes still to play that fall within `beats` of the playhead (and any already due), in chart order.
     public func pendingNotes(within beats: Double) -> [ChartNote] {
         var result: [ChartNote] = []
@@ -231,6 +251,9 @@ public final class GameEngine {
             for midi in played {
                 if let (chord, note) = pendingNote(midi: midi, in: candidates, position: pos) {
                     judge(note: note, chord: chord, position: pos, clock: clock)
+                } else if onset.heardAsWrong == false {
+                    // The microphone heard a key it was listening for, but the game has moved on: not a mistake.
+                    continue
                 } else if !isOtherHandNote(midi: midi, position: pos, window: window) {
                     if wrongNote(midi, clock: clock) { return }
                 }

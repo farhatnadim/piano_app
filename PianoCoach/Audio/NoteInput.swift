@@ -16,8 +16,8 @@ enum NoteSource: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-/// Hears the child's piano: notes from the microphone (through `AnalysisWorker`) or from a MIDI keyboard,
-/// passed to the game as they happen.
+/// Hears the child's piano: keys from the microphone (through `AnalysisWorker`, which listens only around the
+/// pitches of the piano's keys) or from a MIDI keyboard, passed to the game as they happen.
 @MainActor
 @Observable
 final class NoteInput {
@@ -42,6 +42,12 @@ final class NoteInput {
     /// the app's own piano removed whatever the setting says, or it would count the app's notes as played.
     var playbackEchoCancellation = false {
         didSet { if oldValue != playbackEchoCancellation, isListening, noteSource == .microphone { restartListening() } }
+    }
+
+    /// The keys (MIDI numbers) the game is waiting for. The microphone listens for these more readily than
+    /// for the others; anything else needs to be clearly a piano key to count (as a wrong note).
+    @ObservationIgnored var expectedKeys: Set<Int> = [] {
+        didSet { if expectedKeys != oldValue { analysis.setExpectedKeys(expectedKeys) } }
     }
 
     /// Receives every note or chord heard (microphone or MIDI) with its `MonotonicClock` time.

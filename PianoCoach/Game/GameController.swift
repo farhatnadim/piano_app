@@ -452,27 +452,37 @@ final class GameController {
     private func detachInput() {
         input.noteObserver = nil
         input.keyObserver = nil
+        input.expectedKeys = []
     }
 
     private func heard(_ onset: NoteOnset, at clock: Double) {
-        guard phase == .playing, hearsPiano, let engine else { return }
-        if isEchoOfPlayAlong(onset, at: clock, engine: engine) { return }
-        // What the microphone hears shows only as the game's verdict (green or red); guessing which keys
-        // it heard lit up overtones and room noise all over the keyboard.
+        guard phase == .playing, hearsPiano, let engine,
+              let onset = withoutPlayAlongEcho(onset, at: clock, engine: engine) else { return }
+        // What the microphone hears shows only as the game's verdict (green or red).
         engine.handle(onset, at: clock)
         consumeEvents()
     }
 
-    /// Whether the microphone just heard the piano sounding the child's last notes (Learn mode) rather
-    /// than the child: it comes right after, and sounds more like those notes than like the next ones.
-    private func isEchoOfPlayAlong(_ onset: NoteOnset, at clock: Double, engine: GameEngine) -> Bool {
-        guard onset.midiPitches == nil, let sounded = lastSounded else { return false }
+    /// The onset without what the microphone heard of the piano sounding the child's last notes (Learn mode)
+    /// or a tapped key; nil when that's all it heard.
+    private func withoutPlayAlongEcho(_ onset: NoteOnset, at clock: Double, engine: GameEngine) -> NoteOnset? {
+        guard let sounded = lastSounded else { return onset }
         let since = clock - sounded.at
-        guard since > -0.05, since < 0.4 else { return false }
+        if let keys = onset.midiPitches, onset.heardAsWrong != nil {
+            // Keys heard by the microphone: the piano's own attack comes just after it was told to play.
+            guard since > -0.05, since < 0.25 else { return onset }
+            let rest = keys.filter { !sounded.pitches.contains($0) }
+            guard !rest.isEmpty else { return nil }
+            var trimmed = onset
+            trimmed.midiPitches = rest
+            return trimmed
+        }
+        guard onset.midiPitches == nil, since > -0.05, since < 0.4 else { return onset }
+        // Only a sound's pitch content: an echo if it sounds more like those notes than like the next ones.
         let echo = onset.features.similarity(to: .template(forPitches: sounded.pitches))
         let next = engine.upcomingNotes.map(\.midi)
         let expected = next.isEmpty ? 0 : onset.features.similarity(to: .template(forPitches: next))
-        return echo >= expected
+        return echo >= expected ? nil : onset
     }
 
     // MARK: - Frames
@@ -499,6 +509,8 @@ final class GameController {
             demoFrame(now: now)
         } else if let engine {
             engine.update(to: now)
+            // The microphone listens for the keys the game waits for (and judges any other key strictly).
+            if hearsPiano && phase == .playing { input.expectedKeys = engine.listeningPitches }
             position = engine.position
             speed = engine.speed
             progress = engine.progress

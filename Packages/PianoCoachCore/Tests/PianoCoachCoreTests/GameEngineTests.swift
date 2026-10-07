@@ -323,6 +323,50 @@ final class GameEngineTests: XCTestCase {
         XCTAssertEqual(engine.result.wrongNotes, 0)
     }
 
+    func testListensForTheNotesItWaitsFor() {
+        var config = GameConfiguration()
+        config.mode = .learn
+        config.adaptiveSpeed = false
+        let engine = GameEngine(chart: chart, configuration: config)
+        engine.start(at: 0)
+        var clock = 0.0
+        while !engine.isWaiting { clock += 1.0 / 60; engine.update(to: clock) }
+        XCTAssertEqual(engine.listeningPitches, [48, 64])
+        engine.handle(midiOnset([64], at: clock), at: clock)
+        XCTAssertEqual(engine.listeningPitches, [48], "the note still to play")
+
+        config.mode = .play
+        let play = GameEngine(chart: chart, configuration: config)
+        play.start(at: 0)
+        clock = 0
+        while play.position < chart.notes[0].time { clock += 1.0 / 60; play.update(to: clock) }
+        // At 100 BPM the timing window reaches the first two chords.
+        XCTAssertEqual(play.listeningPitches, [48, 64])
+    }
+
+    func testMicrophoneKeysTheGameHasMovedOnFromAreNoMistake() {
+        var config = GameConfiguration()
+        config.mode = .learn
+        config.adaptiveSpeed = false
+        let engine = GameEngine(chart: chart, configuration: config)
+        engine.start(at: 0)
+        var clock = 0.0
+        while !engine.isWaiting { clock += 1.0 / 60; engine.update(to: clock) }
+        func heard(_ keys: [Int], wrong: Bool) -> NoteOnset {
+            NoteOnset(time: clock, strength: 1, levelDB: -30, features: .template(forPitches: keys), midiPitches: keys,
+                      heardAsWrong: wrong)
+        }
+        engine.handle(heard([48, 64], wrong: false), at: clock)
+        XCTAssertEqual(engine.statuses[0], .hit(.perfect))
+        // Heard as expected a moment ago, but the game has moved on: neither a hit nor a mistake.
+        engine.handle(heard([48], wrong: false), at: clock)
+        XCTAssertEqual(engine.stats.wrongNotes, 0)
+        // A key the listener took for a wrong note is one.
+        engine.handle(heard([61], wrong: true), at: clock)
+        XCTAssertEqual(engine.stats.wrongNotes, 1)
+        XCTAssertEqual(engine.takeEvents().last, .wrongNote(midi: 61))
+    }
+
     func testPositionHistoryInterpolates() {
         var config = GameConfiguration()
         config.mode = .play

@@ -82,7 +82,13 @@ final class RobustnessTests: XCTestCase {
     private func be32(_ v: Int) -> [UInt8] { [UInt8((v >> 24) & 0xFF), UInt8((v >> 16) & 0xFF), UInt8((v >> 8) & 0xFF), UInt8(v & 0xFF)] }
 
     private func midiFile(ppq: UInt8, track: [UInt8]) -> Data {
-        Data(Array("MThd".utf8) + be32(6) + [0, 0, 0, 1, 0, ppq] + Array("MTrk".utf8) + be32(track.count) + track)
+        var bytes: [UInt8] = Array("MThd".utf8)
+        bytes += be32(6)
+        bytes += [0, 0, 0, 1, 0, ppq]
+        bytes += Array("MTrk".utf8)
+        bytes += be32(track.count)
+        bytes += track
+        return Data(bytes)
     }
 
     /// Maximal delta times with one tick per quarter note would lay out hundreds of millions of measures.
