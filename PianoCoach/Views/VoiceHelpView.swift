@@ -81,8 +81,8 @@ struct VoiceHelpView: View {
             return "Voice commands are turned off. A grown-up can turn them on in Settings."
         }
         if model.settings.requireWakeWord {
-            return "Start with “Coach”, like “Coach, slower” or “Coach, play”."
+            return "Start with “Coach”, like “Coach, slower” or “Coach, play”, and say just that: the app doesn't listen to the talk around it."
         }
-        return "Just say it out loud. You can also start with “Coach”, like “Coach, slower”."
+        return "Just say it out loud, on its own, like “slower please”. Words in the middle of talking don't count, so chatting nearby won't stop the game."
     }
 }

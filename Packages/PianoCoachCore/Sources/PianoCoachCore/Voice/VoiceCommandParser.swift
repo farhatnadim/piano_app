@@ -16,20 +16,54 @@ public struct VoiceCommandParser: Sendable {
     public var requireWakeWord: Bool
     /// Phrases that address the coach, e.g. "hey coach".
     public var wakeWords: [String]
+    /// When true, an utterance counts only when it is (nearly) all command — "slower please", "okay stop",
+    /// "can you go a bit faster" — and not when a command word turns up in a longer sentence ("wait, did you
+    /// see my keys?"), which is how talk around the piano sounds.
+    public var commandOnly: Bool
 
     public init(requireWakeWord: Bool = false,
-                wakeWords: [String] = ["hey coach", "coach", "hey piano", "piano coach"]) {
+                wakeWords: [String] = ["hey coach", "coach", "hey piano", "piano coach"],
+                commandOnly: Bool = false) {
         self.requireWakeWord = requireWakeWord
         self.wakeWords = wakeWords
+        self.commandOnly = commandOnly
     }
 
     /// The command in `utterance`, or nil if there is none.
     public func parse(_ utterance: String) -> VoiceCommand? {
-        let tokens = Self.normalizedTokens(utterance)
+        var tokens = Self.normalizedTokens(utterance)
         guard !tokens.isEmpty else { return nil }
-        guard requireWakeWord else { return Self.bestMatch(in: tokens)?.command }
-        guard let cut = wakeWordCut(in: tokens) else { return nil }
-        return Self.bestMatch(in: Array(tokens[cut...]))?.command
+        if requireWakeWord {
+            guard let cut = wakeWordCut(in: tokens) else { return nil }
+            tokens = Array(tokens[cut...])
+        }
+        guard let best = Self.bestMatch(in: tokens) else { return nil }
+        guard !commandOnly || Self.isCommandOnly(tokens) else { return nil }
+        return best.command
+    }
+
+    // MARK: - Command-only utterances
+
+    /// Longest utterance (in words) that can be a command on its own.
+    static let longestCommand = 10
+    /// Words that aren't part of a command phrase but may come with one ("okay", "please", "can you").
+    static let fillerWords: Set<String> = [
+        "please", "ok", "okay", "alright", "all", "right", "um", "uh", "uhm", "umm", "er", "erm", "hmm", "ah", "oh",
+        "so", "now", "then", "just", "a", "an", "the", "little", "bit", "lot", "more", "can", "could", "would",
+        "will", "you", "i", "we", "lets", "let", "us", "me", "for", "to", "it", "its", "and", "yeah", "yes", "no",
+        "hey", "hi", "coach", "piano", "maybe", "thanks", "thank", "very", "really", "much", "that", "this", "is",
+        "be", "set", "gonna", "wanna", "too",
+    ]
+
+    /// Whether `tokens` are command phrases and filler words, with at most one other word.
+    static func isCommandOnly(_ tokens: [String]) -> Bool {
+        guard tokens.count <= longestCommand else { return false }
+        var covered = [Bool](repeating: false, count: tokens.count)
+        for m in allMatches(in: tokens) {
+            for i in m.start..<m.end { covered[i] = true }
+        }
+        let others = tokens.indices.filter { !covered[$0] && !fillerWords.contains(tokens[$0]) }
+        return others.count <= 1
     }
 
     /// Canonical phrases (at most 100) to bias the speech recogniser towards,

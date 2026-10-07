@@ -244,4 +244,69 @@ final class VoiceCommandParserTests: XCTestCase {
         XCTAssertNil(p.parse("play"))
         XCTAssertEqual(p.parse("coach play"), .play)
     }
+
+    // MARK: - Command-only utterances
+
+    func testCommandOnlyAcceptsWhatIsSaidToTheCoach() {
+        let strict = VoiceCommandParser(commandOnly: true)
+        let accepted: [(String, VoiceCommand)] = [
+            ("slower", .slower), ("slower please", .slower), ("okay stop", .pause), ("can you go a bit faster", .faster),
+            ("it's too fast", .slower), ("please reduce the speed", .slower), ("hey coach slower", .slower),
+            ("play the song for me", .listen), ("set the speed to sixty percent", .setSpeed(0.6)), ("let's go", .play),
+            ("um stop it", .pause), ("I want to stop", .pause), ("increase the speed", .faster),
+        ]
+        for (text, command) in accepted {
+            assertCommand(text, command, parser: strict)
+        }
+    }
+
+    func testCommandOnlyIgnoresCommandWordsInConversation() {
+        let strict = VoiceCommandParser(commandOnly: true)
+        for text in ["wait did you see my keys", "did you play football today",
+                     "I think we should stop at the store on the way home",
+                     "we need to go faster or we will miss the bus",
+                     "okay sweetie dinner is almost ready can you wait a minute",
+                     "start the car and turn on the heating"] {
+            assertCommand(text, nil, parser: strict)
+            XCTAssertNotNil(parser.parse(text), "the lenient parser still finds a command in \"\(text)\"")
+        }
+        // A long utterance is conversation, whatever its words.
+        assertCommand("stop stop stop stop stop stop stop stop stop stop stop", nil, parser: strict)
+    }
+
+    func testCommandOnlyAfterTheWakeWord() {
+        let strict = VoiceCommandParser(requireWakeWord: true, commandOnly: true)
+        assertCommand("hey coach slower", .slower, parser: strict)
+        assertCommand("blah blah coach stop", .pause, parser: strict)
+        assertCommand("coach did you see where I left my keys stop", nil, parser: strict)
+        assertCommand("stop", nil, parser: strict)
+    }
+}
+
+final class UtteranceTrackerTests: XCTestCase {
+    func testWordsSpokenTogetherAreOneUtterance() {
+        var tracker = UtteranceTracker(pause: 0.7)
+        XCTAssertEqual(tracker.update("can", at: 0), "can")
+        XCTAssertEqual(tracker.update("can you", at: 0.2), "can you")
+        XCTAssertEqual(tracker.update("can you go slower", at: 0.5), "can you go slower")
+    }
+
+    func testAPauseStartsANewUtterance() {
+        var tracker = UtteranceTracker(pause: 0.7)
+        _ = tracker.update("did you see my keys", at: 0)
+        _ = tracker.update("did you see my keys they were on the table", at: 0.6)
+        XCTAssertEqual(tracker.update("did you see my keys they were on the table slower", at: 2.0), "slower")
+        XCTAssertEqual(tracker.update("did you see my keys they were on the table slower please", at: 2.3), "slower please")
+    }
+
+    func testRevisedWordsKeepWhenTheyArrived() {
+        var tracker = UtteranceTracker(pause: 0.7)
+        _ = tracker.update("we should go", at: 0)
+        _ = tracker.update("we should go to", at: 0.3)
+        // The recogniser rewrites the last word long after: still part of the same utterance.
+        XCTAssertEqual(tracker.update("we should go two", at: 1.5), "we should go two")
+        tracker.reset()
+        XCTAssertEqual(tracker.update("stop", at: 5), "stop")
+        XCTAssertEqual(tracker.update("", at: 6), "")
+    }
 }

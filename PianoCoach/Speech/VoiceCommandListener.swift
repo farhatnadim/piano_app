@@ -51,6 +51,9 @@ final class VoiceCommandListener {
     @ObservationIgnored private var wantsRunning = false
     @ObservationIgnored private var isStarting = false
 
+    /// Splits the task's transcript at pauses: only the latest utterance can be a command.
+    @ObservationIgnored private var utterance = UtteranceTracker()
+
     /// The command in the current transcript, waiting to be stable.
     @ObservationIgnored private var pending: VoiceCommand?
     @ObservationIgnored private var pendingSince = 0.0
@@ -174,6 +177,7 @@ final class VoiceCommandListener {
         task = recognizer.recognitionTask(with: request, resultHandler: Self.makeResultHandler(generation: gen, post: post))
         taskStartedAt = MonotonicClock.now()
         lastHeardAt = 0
+        utterance.reset()
         scheduleRefresh(generation: gen)
     }
 
@@ -271,8 +275,13 @@ final class VoiceCommandListener {
             watchdogTask = nil
         }
         if errorMessage != nil { errorMessage = nil }
-        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let command = words.isEmpty ? nil : VoiceCommandParser(requireWakeWord: requireWakeWord || (requireWakeWordWhen?() ?? false)).parse(words)
+        let transcript = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Only a short utterance that is all command counts ("slower please"), never a command word in the
+        // middle of talk around the piano ("wait, did you see my keys?").
+        let words = transcript.isEmpty ? "" : utterance.update(transcript, at: MonotonicClock.now())
+        let parser = VoiceCommandParser(requireWakeWord: requireWakeWord || (requireWakeWordWhen?() ?? false),
+                                        commandOnly: true)
+        let command = words.isEmpty ? nil : parser.parse(words)
         if !words.isEmpty {
             lastHeardAt = MonotonicClock.now()
             showCaption(words)

@@ -31,8 +31,15 @@ enum CleanFurElise {
             ([(4, 1, 76), (5, 1, 75)], []),                                                                    // … E D♯
         ]
         let ending: [Bar] = [([(0, 6, 69)], [(0, 6, 45)]), ([(0, 6, 81)], [(0, 6, 57)])]                      // A, then A A
-        let theme = [turn, toA, toB, toC, turn, toA, backToB]
-        let bars = [pickup] + theme + [firstEnding] + theme + [secondEnding] + middle + theme + ending
+        let theme: [Bar] = [turn, toA, toB, toC, turn, toA, backToB]
+        var bars: [Bar] = [pickup]
+        bars += theme
+        bars.append(firstEnding)
+        bars += theme
+        bars.append(secondEnding)
+        bars += middle
+        bars += theme
+        bars += ending
 
         let threeEight = TimeSignature(beats: 3, beatType: 8)
         var measures: [ScoreMeasure] = []
