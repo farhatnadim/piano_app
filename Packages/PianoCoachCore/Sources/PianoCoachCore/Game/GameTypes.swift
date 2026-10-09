@@ -98,15 +98,13 @@ public struct GameConfiguration: Equatable, Sendable {
     /// More mistakes than this in one measure — notes missed in Play mode, wrong notes in Learn mode —
     /// start the measure again. Nil never restarts.
     public var mistakesAllowedPerMeasure: Int? = 3
-    /// Seconds of lead-in before a restarted measure.
+    /// Seconds of lead-in before a restarted measure (Play mode; Learn mode waits at its first chord).
     public var restartLeadSeconds: Double = 1.5
     public var minSpeed: Double = 0.3
     public var maxSpeed: Double = 1.2
     /// Timing error (seconds) that still counts as perfect / good.
     public var perfectWindow: Double = 0.1
     public var goodWindow: Double = 0.25
-    /// In Learn mode, how far ahead (beats) a chord may be played before it reaches the line.
-    public var earlyWindowBeats: Double = 1.0
     /// Seconds before the first note reaches the line.
     public var leadInSeconds: Double = 3
     /// Microphone: similarity (0...1) between the sound and the expected chord needed to count it as played.

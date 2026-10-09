@@ -14,8 +14,8 @@ struct StaffView: View {
     var body: some View {
         // Read everything the drawing needs here, so the view redraws whenever the game moves.
         let scene = StaffScene(sheet: game.sheetMusic ?? SheetMusic(chart: chart), chart: chart, position: game.position,
-                               speed: game.speed, statuses: game.statuses, hitTimes: game.hitTimes, now: game.frameTime,
-                               showLetters: game.showLetters, isDark: colorScheme == .dark)
+                               speed: game.startSpeed, statuses: game.statuses, hitTimes: game.hitTimes, now: game.frameTime,
+                               catchUpOrder: game.catchUpOrder, showLetters: game.showLetters, isDark: colorScheme == .dark)
         Canvas { context, size in
             scene.draw(in: &context, size: size)
         }
@@ -75,10 +75,14 @@ struct StaffScene {
     let sheet: SheetMusic
     let chart: NoteChart
     let position: Double
+    /// The speed the notes are spaced for: the game's starting speed, so the spacing stays put while the
+    /// speed follows the player (it would look like the view zooming by itself).
     let speed: Double
     let statuses: [NoteStatus]
     let hitTimes: [Int: Double]
     let now: Double
+    /// While the player is behind: the order to play the notes in, by note id.
+    var catchUpOrder: [Int: Int] = [:]
     let showLetters: Bool
     let isDark: Bool
 
@@ -112,6 +116,7 @@ struct StaffScene {
                                            endPoint: CGPoint(x: playheadX + glowWidth / 2, y: 0)))
 
         let upcoming = nextNoteTime
+        let catchUpCount = CatchUpShade.count(catchUpOrder)
         let renderer = SheetMusicRenderer(
             sheet: sheet, staff: staff, x: x, visibleBeats: visible, position: position, showLetters: showLetters,
             isDark: isDark, paper: paper,
@@ -119,6 +124,11 @@ struct StaffScene {
                 guard id < statuses.count, id < chart.notes.count else { return nil }
                 switch statuses[id] {
                 case .pending:
+                    // Catching up: green, brightest for the next note to play.
+                    if let number = catchUpOrder[id] {
+                        let level = CatchUpShade.shown(CatchUpShade.level(number, of: catchUpCount), now: now)
+                        return GameColors.hit.opacity(max(0.2, level))
+                    }
                     return upcoming.map { abs(chart.notes[id].time - $0) < 1e-3 } == true ? Color.accentColor : nil
                 case .hit: return GameColors.hit
                 case .missed: return GameColors.wrong.opacity(0.8)

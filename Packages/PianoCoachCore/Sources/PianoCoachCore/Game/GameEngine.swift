@@ -228,18 +228,19 @@ public final class GameEngine {
         let window = configuration.goodWindow * bps
         // Following the player in Play mode, they may be a little behind the notes or ahead of them.
         let behind = configuration.mode == .play ? lateWindow * bps : window
-        let ahead = configuration.mode == .learn ? max(window, configuration.earlyWindowBeats) : lateWindow * bps
+        let ahead = lateWindow * bps
         // Chords close enough to the line to be the ones the player means. Learn mode takes the notes in
-        // order: only the chord it waits for (or the one coming up) counts, so a wrong note never moves it on.
+        // order: only the chord it waits for (or the one coming up, however far off) counts, so a wrong note
+        // never moves it on and playing the next note straight after a long one isn't a mistake.
         var candidates: [Int] = []
         var c = nextChord
         while c < chords.count {
             let t = chartTime(ofChord: c)
-            if t > pos + ahead { break }
             if configuration.mode == .learn {
                 candidates.append(c)
                 break
             }
+            if t > pos + ahead { break }
             if t >= pos - behind { candidates.append(c) }
             c += 1
         }
@@ -445,7 +446,11 @@ public final class GameEngine {
             }
         }
         nextChord = chords.firstIndex { chart.notes[$0[0]].time >= start - 1e-9 } ?? chords.count
-        position = start - configuration.restartLeadSeconds * beatsPerSecond
+        // Learn mode jumps straight back to the measure's first chord and waits there: a lead-in would roll
+        // the notes (and the other hand's part) on by themselves, as if the game were playing.
+        position = configuration.mode == .learn
+            ? (nextChord < chords.count ? chartTime(ofChord: nextChord) : start)
+            : start - configuration.restartLeadSeconds * beatsPerSecond
         history.removeAll()
         record(clock)
         combo = 0

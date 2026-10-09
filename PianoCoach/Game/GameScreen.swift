@@ -102,9 +102,10 @@ private struct PlayArea: View {
         let secondsPerBeat = chart.secondsPerBeat(atSpeed: game.speed)
         GeometryReader { geo in
             let minimumKeys = Self.minimumWhiteKeys(forWidth: geo.size.width)
-            let layout = Self.layout(for: zoom, chart: chart, camera: camera, position: position,
-                                     secondsPerBeat: secondsPerBeat, minimumKeys: minimumKeys)
-            let sizingKeys = zoom == .auto ? max(minimumKeys, camera.songWhiteKeys) : layout.visibleWhiteKeys
+            let layouts = Self.layouts(for: zoom, chart: chart, hands: game.hands, camera: camera,
+                                       position: position, secondsPerBeat: secondsPerBeat, minimumKeys: minimumKeys)
+            let shownKeys = layouts.map(\.visibleWhiteKeys).reduce(0, +)
+            let sizingKeys = zoom == .auto ? max(minimumKeys, camera.songWhiteKeys) : shownKeys
             VStack(spacing: 0) {
                 if game.phase == .demo {
                     DemoBar(game: game)
@@ -112,15 +113,23 @@ private struct PlayArea: View {
                     GameHUD(game: game, compact: geo.size.width < 520)
                 }
                 ZStack(alignment: .top) {
-                    if display == .keys {
-                        FallingNotesView(game: game, chart: chart, layout: layout)
-                    } else {
+                    switch display {
+                    case .keys:
+                        KeyboardColumns(layouts: layouts) { layout in
+                            FallingNotesView(game: game, chart: chart, layout: layout)
+                        }
+                    case .rain:
+                        KeyboardColumns(layouts: layouts) { layout in
+                            RainingStaffView(game: game, chart: chart, layout: layout)
+                        }
+                    case .notes:
                         StaffView(game: game, chart: chart)
                     }
                     // At the top, clear of the notes at the line.
                     VStack(spacing: 8) {
                         CheerBubble(game: game)
                         WaitingHint(game: game)
+                        CatchUpHint(game: game)
                     }
                     .padding(.top, 12)
                 }
@@ -129,24 +138,27 @@ private struct PlayArea: View {
                     KeyboardZoomPicker()
                         .padding(10)
                 }
-                if zoom == .auto {
+                if zoom == .auto, let layout = layouts.first {
                     KeyboardMinimap(layout: layout, glows: game.keyGlows, hints: game.upcomingKeys)
                         .frame(height: KeyboardMinimap.height)
                 }
-                GameKeyboard(game: game, layout: layout)
-                    .frame(height: Self.keyboardHeight(for: geo.size, whiteKeys: sizingKeys, display: display))
+                KeyboardColumns(layouts: layouts) { layout in
+                    GameKeyboard(game: game, layout: layout)
+                }
+                .frame(height: Self.keyboardHeight(for: geo.size, whiteKeys: sizingKeys, display: display))
             }
         }
         .overlay { PhaseOverlay(game: game) }
         .onChange(of: chart, initial: true) { preparedCamera = KeyboardCamera(chart: chart) }
     }
 
-    static func layout(for zoom: KeyboardZoom, chart: NoteChart, camera: KeyboardCamera, position: Double,
-                       secondsPerBeat: Double, minimumKeys: Double) -> KeyboardLayout {
+    /// The keyboards to show: two side by side when both hands are practised on the song's keys, else one.
+    static func layouts(for zoom: KeyboardZoom, chart: NoteChart, hands: HandSelection, camera: KeyboardCamera,
+                        position: Double, secondsPerBeat: Double, minimumKeys: Double) -> [KeyboardLayout] {
         switch zoom {
-        case .song: return KeyboardZoom.songLayout(for: chart, minimumWhiteKeys: minimumKeys)
-        case .auto: return camera.layout(at: position, secondsPerBeat: secondsPerBeat, minimumWhiteKeys: minimumKeys)
-        case .all: return .wholeKeyboard
+        case .song: return KeyboardZoom.songLayouts(for: chart, hands: hands)
+        case .auto: return [camera.layout(at: position, secondsPerBeat: secondsPerBeat, minimumWhiteKeys: minimumKeys)]
+        case .all: return [.wholeKeyboard]
         }
     }
 
@@ -161,8 +173,30 @@ private struct PlayArea: View {
     static func keyboardHeight(for size: CGSize, whiteKeys: Double, display: GameDisplay) -> CGFloat {
         let whiteKey = size.width / CGFloat(max(1, whiteKeys))
         switch display {
-        case .keys: return max(80, min(size.height * 0.24, whiteKey * 5.5, 280))
+        case .keys, .rain: return max(80, min(size.height * 0.24, whiteKey * 5.5, 280))
         case .notes: return max(64, min(size.height * 0.17, whiteKey * 4.5, 170))
+        }
+    }
+}
+
+/// One column per keyboard window, side by side with a small gap, each as wide as its share of the keys so
+/// every key is the same size.
+private struct KeyboardColumns<Content: View>: View {
+    let layouts: [KeyboardLayout]
+    @ViewBuilder let content: (KeyboardLayout) -> Content
+
+    static var gap: CGFloat { 12 }
+
+    var body: some View {
+        GeometryReader { geo in
+            let keys = max(1, layouts.map(\.visibleWhiteKeys).reduce(0, +))
+            let available = max(0, geo.size.width - Self.gap * CGFloat(layouts.count - 1))
+            HStack(spacing: Self.gap) {
+                ForEach(layouts.indices, id: \.self) { i in
+                    content(layouts[i])
+                        .frame(width: available * CGFloat(layouts[i].visibleWhiteKeys / keys))
+                }
+            }
         }
     }
 }
@@ -174,7 +208,7 @@ private struct GameKeyboard: View {
 
     var body: some View {
         PianoKeyboardView(layout: layout, glows: game.keyGlows, hints: game.upcomingKeys, now: game.frameTime,
-                          showLetters: game.showLetters,
+                          showLetters: game.showLetters, catchUp: game.catchUpKeys,
                           onPress: { game.tapKey($0) })
     }
 }

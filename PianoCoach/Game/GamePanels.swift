@@ -220,7 +220,11 @@ struct StartPanel: View {
                     }
                     HStack(spacing: 12) {
                         modeTile(.learn, systemImage: "graduationcap.fill", explanation: "The notes wait for you")
-                        modeTile(.play, systemImage: "bolt.fill", explanation: "Keep up and score points")
+                        // Play mode is put away for now (Settings can bring it back).
+                        if model.settings.showsPlayMode {
+                            modeTile(.play, systemImage: "bolt.fill", explanation: "Keep up and score points")
+                        }
+                        watchTile
                     }
                     playsOnPicker
                     buttons
@@ -280,15 +284,28 @@ struct StartPanel: View {
     }
 
     private func modeTile(_ mode: GameMode, systemImage: String, explanation: String) -> some View {
-        let selected = game.mode == mode
+        tile(mode.displayName, systemImage: systemImage, explanation: explanation, selected: game.mode == mode) {
+            game.mode = mode
+        }
+    }
+
+    /// Hear and see the song played, to learn it by ear before playing.
+    private var watchTile: some View {
+        tile("Watch and listen", systemImage: "ear", explanation: "Hear the song and see the keys", selected: false) {
+            game.playDemo()
+        }
+    }
+
+    private func tile(_ title: String, systemImage: String, explanation: String, selected: Bool,
+                      action: @escaping () -> Void) -> some View {
         let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
-        return Button { game.mode = mode } label: {
+        return Button(action: action) {
             // Explicit colours: hierarchical styles inside a button label take on the tint and wash out.
             VStack(alignment: .leading, spacing: 6) {
                 Image(systemName: systemImage)
                     .font(.title2)
                     .foregroundStyle(selected ? Color.accentColor : Color.primary.opacity(0.6))
-                Text(mode.displayName)
+                Text(title)
                     .font(.title3.weight(.bold))
                     .foregroundStyle(Color.primary)
                 Text(explanation)
@@ -308,7 +325,7 @@ struct StartPanel: View {
         }
         .buttonStyle(PressableButtonStyle())
         .gameHoverEffect()
-        .accessibilityLabel("\(mode.displayName): \(explanation)")
+        .accessibilityLabel("\(title): \(explanation)")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -374,6 +391,7 @@ struct StartPanel: View {
             Picker("Show", selection: $game.display) {
                 Text("Keys").tag(GameDisplay.keys)
                 Text("Notes").tag(GameDisplay.notes)
+                Text("Rain").tag(GameDisplay.rain)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -431,13 +449,6 @@ struct StartPanel: View {
             .buttonBorderShape(.capsule)
             .macKeyboardShortcut(.space)
             .help("Start (space)")
-            Button { game.playDemo() } label: {
-                Label("Watch and listen", systemImage: "ear")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 36)
-            }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.capsule)
         }
     }
 

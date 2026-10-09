@@ -2,16 +2,19 @@ import PianoCoachCore
 import SwiftUI
 
 /// A piano keyboard drawn in one Canvas, with key glows (right, early, late, wrong), green hints on the keys
-/// to play next (flashing as their moment comes, steady once it's there), letter names and a mark on middle C. It shows the part of the 88 keys in `layout`'s window
+/// to play now (flashing, and only once their turn has come), a steady blue outline on the keys of the chord after
+/// it (get ready, don't press yet), letter names and a mark on middle C. It shows the part of the 88 keys in `layout`'s window
 /// (all of them, or the part the song is played on). Tapping or sliding across it plays keys.
 struct PianoKeyboardView: View {
     let layout: KeyboardLayout
     var glows: [Int: KeyGlow] = [:]
-    /// Keys to play soon: 0 = still a moment away (flashing), 1 = due now (steady).
+    /// Keys to play soon: 0 = still a moment away, 1 = due now (only those show, flashing).
     var hints: [Int: Double] = [:]
     /// The clock the flashing follows (any steadily increasing seconds).
     var now: Double = 0
     var showLetters = true
+    /// While catching up: how bright a green to show each key, by MIDI number (1 = the next to play).
+    var catchUp: [Int: Double] = [:]
     /// Called with the key's MIDI number when a key is touched (nil: the keyboard only shows).
     var onPress: ((Int) -> Void)?
 
@@ -20,7 +23,7 @@ struct PianoKeyboardView: View {
 
     var body: some View {
         let renderer = KeyboardRenderer(layout: layout, glows: glows, hints: hints, now: now, showLetters: showLetters,
-                                        isDark: colorScheme == .dark)
+                                        catchUp: catchUp, isDark: colorScheme == .dark)
         GeometryReader { geo in
             Canvas { context, size in
                 renderer.draw(in: &context, size: size)
@@ -55,23 +58,34 @@ struct KeyboardRenderer {
     let hints: [Int: Double]
     let now: Double
     let showLetters: Bool
+    var catchUp: [Int: Double] = [:]
     let isDark: Bool
 
-    /// How strongly to show a hinted key right now: steady when due, flashing (about 3 times a second)
-    /// while its moment approaches.
+    /// How strongly to show a hinted key right now: the key to press now flashes (about 3 times a second);
+    /// keys still coming don't show at all, so nobody presses them early.
     private func hintLevel(_ midi: Int) -> Double? {
+        // Catching up: green, fading from the key to play next (which flashes) to the last.
+        if !catchUp.isEmpty { return catchUp[midi].map { CatchUpShade.shown($0, now: now) } }
         guard let closeness = hints[midi] else { return nil }
-        if closeness >= 0.999 { return 1 }
-        let flash = (now * 3).truncatingRemainder(dividingBy: 1) < 0.5 ? 1.0 : 0.25
-        return flash * (0.5 + 0.5 * closeness)
+        return closeness >= 0.999 ? CatchUpShade.shown(1, now: now) : nil
     }
 
     /// Narrowest white key that gets its letter, and the narrowest where C keys also get their octave ("C4").
     static let letterMinimumWidth: CGFloat = 14
     static let octaveMinimumWidth: CGFloat = 22
 
+    /// The keys of the chord coming next (the nearest one not due yet): outlined in steady blue, to get
+    /// ready for without pressing. Not while catching up, which has its own order.
+    private var preparing: Set<Int> {
+        guard catchUp.isEmpty else { return [] }
+        let coming = hints.filter { $0.value < 0.999 }
+        guard let nearest = coming.values.max() else { return [] }
+        return Set(coming.filter { $0.value >= nearest - 0.02 }.keys)
+    }
+
     func draw(in context: inout GraphicsContext, size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
+        let preparing = preparing
         context.clip(to: Path(CGRect(origin: .zero, size: size)))
         let white = layout.whiteKeyWidth(forWidth: size.width)
         let height = size.height
@@ -98,9 +112,13 @@ struct KeyboardRenderer {
             if let glow {
                 context.fill(key, with: .color(GameColors.color(for: glow).opacity(0.85)))
             } else if let level = hintLevel(midi) {
-                context.fill(key, with: .color(GameColors.hint.opacity(0.15 + 0.5 * level)))
+                context.fill(key, with: .color(GameColors.hint.opacity(0.9 * level)))
                 context.stroke(Path(roundedRect: rect.insetBy(dx: 1.5, dy: 1.5), cornerRadius: radius, style: .continuous),
-                               with: .color(GameColors.hint.opacity(0.4 + 0.6 * level)), lineWidth: 3)
+                               with: .color(GameColors.hint.opacity(level)), lineWidth: 3)
+            } else if preparing.contains(midi) {
+                context.fill(key, with: .color(GameColors.prepare.opacity(0.15)))
+                context.stroke(Path(roundedRect: rect.insetBy(dx: 2, dy: 2), cornerRadius: radius, style: .continuous),
+                               with: .color(GameColors.prepare), lineWidth: 3.5)
             }
 
             var markerY = height - max(10, white * 0.3)
@@ -153,13 +171,16 @@ struct KeyboardRenderer {
                                  with: .color(Color(white: 1, opacity: 0.12)))
                 }
                 if let level = hintLevel(midi) {
-                    context.fill(key, with: .color(GameColors.hint.opacity(0.2 + 0.5 * level)))
+                    context.fill(key, with: .color(GameColors.hint.opacity(0.9 * level)))
                     context.stroke(Path(roundedRect: rect.insetBy(dx: 1.5, dy: 1.5), cornerRadius: r, style: .continuous),
-                                   with: .color(GameColors.hint.opacity(0.4 + 0.6 * level)), lineWidth: 3)
+                                   with: .color(GameColors.hint.opacity(level)), lineWidth: 3)
                     let dot = min(10, max(5, span.width * 0.35))
                     context.fill(Path(ellipseIn: CGRect(x: span.midX - dot / 2, y: blackHeight - dot - 10,
                                                         width: dot, height: dot)),
                                  with: .color(GameColors.hint))
+                } else if preparing.contains(midi) {
+                    context.stroke(Path(roundedRect: rect.insetBy(dx: 2, dy: 2), cornerRadius: r, style: .continuous),
+                                   with: .color(GameColors.prepare), lineWidth: 3)
                 }
             }
         }
@@ -181,6 +202,8 @@ enum GameColors {
     static let wrong = Color(red: 0.95, green: 0.25, blue: 0.25)
     /// The keys to play next: green, like a hit, because that's what pressing them will be.
     static let hint = hit
+    /// The keys after those: blue, get ready (yellow means late and red wrong, so neither of those).
+    static let prepare = Color(red: 0.2, green: 0.55, blue: 1)
     /// Stars and scores.
     static let star = Color(red: 1, green: 0.8, blue: 0.1)
 

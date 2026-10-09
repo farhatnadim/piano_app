@@ -114,12 +114,17 @@ final class AppModel {
     func applySettings() {
         input.noteSource = settings.noteSource
         input.sensitivity = Float(settings.sensitivity)
+        input.microphoneMuted = settings.microphoneMuted
+        if !settings.showsPlayMode && game.mode == .play && game.phase != .playing && game.phase != .paused {
+            game.mode = .learn
+        }
         input.echoCancellation = settings.echoCancellation
         voice.requireWakeWord = settings.requireWakeWord
+        let wantsVoice = settings.voiceCommandsEnabled && !settings.microphoneMuted
         if openPieceID != nil {
-            if settings.voiceCommandsEnabled && !voice.isRunning {
+            if wantsVoice && !voice.isRunning {
                 Task { await voice.start() }
-            } else if !settings.voiceCommandsEnabled && voice.isRunning {
+            } else if !wantsVoice && voice.isRunning {
                 voice.stop()
                 stopMicrophoneIfIdle()
             }

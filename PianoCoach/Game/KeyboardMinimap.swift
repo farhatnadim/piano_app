@@ -82,7 +82,7 @@ struct MinimapRenderer {
 
     private func color(for midi: Int) -> Color? {
         if let glow = glows[midi] { return GameColors.color(for: glow) }
-        if hints[midi] != nil { return GameColors.hint }
+        if (hints[midi] ?? 0) >= 0.999 { return GameColors.hint }
         return nil
     }
 }

@@ -8,11 +8,19 @@ enum GameDisplay: String, CaseIterable, Identifiable, Codable {
     case keys
     /// A scrolling staff, to learn reading notes; notes light up when played.
     case notes
+    /// The staff turned upright, its notes raining down onto the keys they're played on.
+    case rain
 
     static let storageKey = "gameDisplay"
 
     var id: String { rawValue }
-    var displayName: String { self == .keys ? "Keys" : "Notes" }
+    var displayName: String {
+        switch self {
+        case .keys: return "Keys"
+        case .notes: return "Notes"
+        case .rain: return "Rain"
+        }
+    }
 }
 
 /// What the child plays on.
@@ -122,10 +130,31 @@ final class GameController {
     private(set) var statuses: [NoteStatus] = []
     /// Keys of the next notes to play (a gentle hint on the keyboard).
     /// Keys to play soon, with how close their moment is: 0 when `hintLeadSeconds` away, 1 when due now
-    /// (the key flashes as it approaches and holds steady once due).
+    /// (the keyboard shows only the ones due, flashing).
     private(set) var upcomingKeys: [Int: Double] = [:]
-    /// How long before its time a note's key starts to flash.
+    /// How long before its time a note's key starts to show.
     static let hintLeadSeconds = 1.0
+    /// While the player is behind, the order to catch up in: 1 for the earliest chord still to play, then 2,
+    /// 3..., by note id (empty when they're keeping up).
+    private(set) var catchUpOrder: [Int: Int] = [:]
+    /// The same order by key, as how bright a green to show it (see `CatchUpShade`): a key's brightest
+    /// (the first time it's needed).
+    var catchUpKeys: [Int: Double] {
+        guard let chart else { return [:] }
+        let count = CatchUpShade.count(catchUpOrder)
+        var keys: [Int: Double] = [:]
+        for (id, number) in catchUpOrder where chart.notes.indices.contains(id) {
+            let midi = chart.notes[id].midi
+            keys[midi] = max(keys[midi] ?? 0, CatchUpShade.level(number, of: count))
+        }
+        return keys
+    }
+    /// The player counts as behind once the earliest note still to play is this late...
+    static let catchUpLateSeconds = 0.25
+    /// ...and then the chords due by now, plus those coming within this long, are put in order (at most
+    /// `catchUpMaxNumbers` of them). None ahead: a note shows only once its turn has come.
+    static let catchUpLeadSeconds = 0.0
+    static let catchUpMaxNumbers = 6
     /// Keys to light, by MIDI number.
     private(set) var keyGlows: [Int: KeyGlow] = [:]
     /// When each note was hit (clock time, by note id), for hit animations.
@@ -289,6 +318,7 @@ final class GameController {
         engine = nil
         isWaiting = false
         upcomingKeys = [:]
+        catchUpOrder = [:]
         keyGlows = [:]
         glowUntil = [:]
         cheer = nil
@@ -516,6 +546,8 @@ final class GameController {
             progress = engine.progress
             isWaiting = engine.isWaiting
             upcomingKeys = Self.hints(for: engine, chart: chart, speed: speed)
+            let order = Self.catchUpOrder(for: engine, chart: chart, speed: speed)
+            if order != catchUpOrder { catchUpOrder = order }
             accompany(now: now)
             consumeEvents()
         }
@@ -581,6 +613,7 @@ final class GameController {
         detachInput()
         sound.allNotesOff()
         upcomingKeys = [:]
+        catchUpOrder = [:]
     }
 
     /// The keys of the notes due within `hintLeadSeconds`, each with how close it is (0...1).
@@ -594,6 +627,27 @@ final class GameController {
             hints[note.midi] = max(hints[note.midi] ?? 0, closeness)
         }
         return hints
+    }
+
+    /// While the player is behind, numbers for the notes to play in order (see `catchUpOrder`).
+    private static func catchUpOrder(for engine: GameEngine, chart: NoteChart?, speed: Double) -> [Int: Int] {
+        guard let chart else { return [:] }
+        let secondsPerBeat = chart.secondsPerBeat(atSpeed: speed)
+        let position = engine.position
+        let notes = engine.pendingNotes(within: catchUpLeadSeconds / secondsPerBeat)
+        guard let first = notes.first, position - first.time >= catchUpLateSeconds / secondsPerBeat else { return [:] }
+        var order: [Int: Int] = [:]
+        var number = 0
+        var chordTime = -Double.infinity
+        for note in notes {
+            if note.time > chordTime + 1e-6 {
+                guard number < catchUpMaxNumbers else { break }
+                number += 1
+                chordTime = note.time
+            }
+            order[note.id] = number
+        }
+        return order
     }
 
     /// Play mode with play-along: the piano plays the whole song, in time with the notes.

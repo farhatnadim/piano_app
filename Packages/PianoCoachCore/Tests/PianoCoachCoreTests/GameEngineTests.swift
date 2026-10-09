@@ -288,7 +288,24 @@ final class GameEngineTests: XCTestCase {
         XCTAssertEqual(restarts(in: engine.takeEvents()), [0])
         XCTAssertEqual(engine.statuses[0], .pending, "the measure's first chord is to play again")
         XCTAssertEqual(engine.upcomingNotes.map(\.midi), [48, 64])
-        XCTAssertLessThan(engine.position, 0)
+        // Straight back to the first chord, waiting there: nothing rolls on by itself.
+        XCTAssertEqual(engine.position, chart.notes[0].time, accuracy: 1e-9)
+        clock += 1
+        engine.update(to: clock)
+        XCTAssertTrue(engine.isWaiting)
+        XCTAssertEqual(engine.position, chart.notes[0].time, accuracy: 1e-9)
+    }
+
+    func testLearnModeTakesTheNextChordHoweverEarly() {
+        var config = GameConfiguration()
+        config.mode = .learn
+        config.adaptiveSpeed = false
+        let engine = GameEngine(chart: chart, configuration: config)
+        engine.start(at: 0)
+        // Played before the first chord is anywhere near the line: it counts, it isn't a wrong note.
+        engine.handle(midiOnset([48, 64], at: 0.01), at: 0.01)
+        XCTAssertFalse(engine.takeEvents().contains { if case .wrongNote = $0 { return true } else { return false } })
+        XCTAssertNotEqual(engine.statuses[0], .pending)
     }
 
     func testRightHandOnlyDoesNotRequireOrPunishLeftHand() {

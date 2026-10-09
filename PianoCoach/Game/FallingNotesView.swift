@@ -14,8 +14,9 @@ struct FallingNotesView: View {
     var body: some View {
         // Read everything the drawing needs here, so the view redraws whenever the game moves.
         let scene = FallingNotesScene(
-            chart: chart, layout: layout, position: game.position, speed: game.speed, statuses: game.statuses,
+            chart: chart, layout: layout, position: game.position, speed: game.startSpeed, statuses: game.statuses,
             hitTimes: game.hitTimes, now: game.frameTime, upcomingKeys: game.upcomingKeys,
+            catchUpOrder: game.catchUpOrder,
             isWaiting: game.isWaiting && game.phase == .playing,
             showLetters: game.showLetters, isDark: colorScheme == .dark)
         Canvas { context, size in
@@ -31,11 +32,15 @@ struct FallingNotesScene {
     let chart: NoteChart
     let layout: KeyboardLayout
     let position: Double
+    /// The speed the notes are spaced for: the game's starting speed, so the spacing stays put while the
+    /// speed follows the player (it would look like the view zooming by itself).
     let speed: Double
     let statuses: [NoteStatus]
     let hitTimes: [Int: Double]
     let now: Double
     let upcomingKeys: [Int: Double]
+    /// While the player is behind: the order to play the notes in, by note id.
+    let catchUpOrder: [Int: Int]
     let isWaiting: Bool
     let showLetters: Bool
     let isDark: Bool
@@ -66,7 +71,7 @@ struct FallingNotesScene {
         // Learn mode waits at the line: make the keys to play glow.
         if isWaiting {
             let pulse = 0.5 + 0.5 * sin(now * 5)
-            for midi in upcomingKeys.keys {
+            for midi in upcomingKeys.keys where upcomingKeys[midi]! >= 0.999 {
                 guard let span = layout.span(of: midi, width: size.width) else { continue }
                 let height = min(hitY, 160)
                 context.fill(Path(CGRect(x: span.x, y: hitY - height, width: span.width, height: height)),
@@ -79,6 +84,25 @@ struct FallingNotesScene {
 
         drawHitLine(in: &context, size: size)
         drawNotes(in: &context, size: size, pixelsPerBeat: pixelsPerBeat, topBeat: topBeat, y: y)
+        drawCatchUpMarks(in: &context, size: size, y: y)
+    }
+
+    /// While the player is behind, a green glow at the line in the lane of each late note to play, brightest
+    /// for the next one (the bars still above the line are shaded green in `drawNotes`).
+    private func drawCatchUpMarks(in context: inout GraphicsContext, size: CGSize, y: (Double) -> CGFloat) {
+        let count = CatchUpShade.count(catchUpOrder)
+        let hitY = size.height
+        for (id, number) in catchUpOrder where id < chart.notes.count {
+            let note = chart.notes[id]
+            guard y(note.time) >= hitY - 4, let lane = layout.span(of: note.midi, width: size.width) else { continue }
+            let level = CatchUpShade.shown(CatchUpShade.level(number, of: count), now: now)
+            let height = min(hitY, 90)
+            context.fill(Path(CGRect(x: lane.x, y: hitY - height, width: lane.width, height: height)),
+                         with: .linearGradient(Gradient(colors: [GameColors.hit.opacity(0),
+                                                                 GameColors.hit.opacity(0.85 * level)]),
+                                               startPoint: CGPoint(x: 0, y: hitY - height),
+                                               endPoint: CGPoint(x: 0, y: hitY)))
+        }
     }
 
     /// Faint columns behind the black keys and lines between octaves, so the lanes are easy to follow. They
@@ -114,6 +138,7 @@ struct FallingNotesScene {
         // Resolved once per name and frame, with its size, to label only the bars it fits in.
         var letters: [String: (text: GraphicsContext.ResolvedText, size: CGSize)] = [:]
         let dimmed = Color.gray.opacity(0.35)
+        let catchUpCount = CatchUpShade.count(catchUpOrder)
 
         for note in chart.notes {
             if note.time > topBeat { break }
@@ -132,6 +157,13 @@ struct FallingNotesScene {
             let handColor = GameColors.color(for: note.hand)
 
             switch status {
+            case .pending where catchUpOrder[note.id] != nil:
+                // Catching up: green, brightest for the next note to play.
+                let level = CatchUpShade.level(catchUpOrder[note.id]!, of: catchUpCount)
+                context.fill(bar, with: .color(handColor.opacity(0.25)))
+                context.fill(bar, with: .color(GameColors.hit.opacity(CatchUpShade.shown(level, now: now))))
+                context.stroke(bar, with: .color(level >= 1 ? Color.white.opacity(0.9) : GameColors.hit.opacity(0.8)),
+                               lineWidth: level >= 1 ? 3 : 1.5)
             case .pending:
                 let isNear = note.time - position < nearBeats
                 context.fill(bar, with: .color(handColor))
@@ -183,6 +215,47 @@ struct FallingNotesScene {
                                                center: CGPoint(x: glow.midX, y: glow.midY),
                                                startRadius: 0, endRadius: glowWidth / 2))
         }
+    }
+}
+
+/// While catching up, how opaque a green to show each note to play: solid (and flashing) for the next one,
+/// then a clear step down to translucent, fading out towards the last one in `GameController.catchUpOrder`.
+enum CatchUpShade {
+    static func level(_ number: Int, of count: Int) -> Double {
+        if number <= 1 { return 1 }
+        guard count > 2 else { return 0.35 }
+        return 0.35 - 0.27 * Double(number - 2) / Double(count - 2)
+    }
+
+    /// `level` as shown at `now`: the next note (level 1) blinks on and off about three times a second.
+    static func shown(_ level: Double, now: Double) -> Double {
+        guard level >= 1 else { return level }
+        return (now * 3).truncatingRemainder(dividingBy: 1) < 0.5 ? 1 : 0
+    }
+
+    /// How many chords are in the order.
+    static func count(_ order: [Int: Int]) -> Int { order.values.max() ?? 0 }
+}
+
+/// "Catch up: play the brightest green first": shown while the player is behind the notes.
+struct CatchUpHint: View {
+    let game: GameController
+
+    var body: some View {
+        let show = !game.catchUpOrder.isEmpty && game.phase == .playing && !game.isWaiting
+        ZStack {
+            if show {
+                Label("Catch up: play the brightest green first", systemImage: "forward.fill")
+                    .font(.headline)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: Capsule())
+                    .overlay { Capsule().strokeBorder(GameColors.hit, lineWidth: 2) }
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: show)
+        .allowsHitTesting(false)
     }
 }
 

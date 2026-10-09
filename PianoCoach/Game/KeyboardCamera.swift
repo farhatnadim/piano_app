@@ -2,10 +2,10 @@ import Foundation
 import PianoCoachCore
 
 /// How much of the keyboard the game shows: the child's choice, kept in `@AppStorage(KeyboardZoom.storageKey)`.
-/// By default the keys from the song's lowest note to its highest, held still: a keyboard that zooms and
+/// By default exactly the keys from the song's lowest note to its highest, held still: a keyboard that zooms and
 /// slides is distracting mid-song.
 enum KeyboardZoom: String, CaseIterable, Identifiable {
-    /// The keys between the song's lowest and highest notes, held still (the default).
+    /// The keys from the song's lowest note to its highest, inclusive, held still (the default).
     case song
     /// Zoom in on the keys the song is played on and follow the music up and down the keyboard.
     case auto
@@ -32,17 +32,35 @@ enum KeyboardZoom: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The still window from the song's lowest note to its highest, with a couple of keys to spare on each
-    /// side and never narrower than two octaves (or `minimumWhiteKeys`).
-    static func songLayout(for chart: NoteChart, minimumWhiteKeys: Double) -> KeyboardLayout {
-        guard let lowest = chart.notes.map(\.midi).min(), let highest = chart.notes.map(\.midi).max() else {
-            return .wholeKeyboard
+    /// The still windows for the song: one keyboard per hand when both are practised and their keys don't
+    /// overlap (left hand on the left, right hand on the right, the unused keys between them cut out),
+    /// otherwise one window over the practised hands' keys.
+    static func songLayouts(for chart: NoteChart, hands: HandSelection) -> [KeyboardLayout] {
+        if hands == .both {
+            let left = chart.notes.filter { $0.hand == .left }.map(\.midi)
+            let right = chart.notes.filter { $0.hand == .right }.map(\.midi)
+            if let leftLayout = layout(fitting: left), let rightLayout = layout(fitting: right),
+               leftLayout.visibleEnd <= rightLayout.visibleStart + 1e-6 {
+                return [leftLayout, rightLayout]
+            }
         }
-        let low = KeyboardLayout.extent(of: max(KeyboardLayout.lowestKey, lowest)).lowerBound - KeyboardCamera.padding
-        let high = KeyboardLayout.extent(of: min(KeyboardLayout.highestKey, highest)).upperBound + KeyboardCamera.padding
-        let width = max(minimumWhiteKeys, high - low)
-        // Centre the song's keys when the window is wider than they need.
-        return KeyboardLayout(visibleStart: (low + high) / 2 - width / 2, visibleWhiteKeys: width)
+        return [songLayout(for: chart, hands: hands)]
+    }
+
+    /// The still window from the lowest key the practised hands play to their highest, inclusive, with nothing
+    /// to spare (the other hand, played by the built-in piano, may fall outside it).
+    static func songLayout(for chart: NoteChart, hands: HandSelection) -> KeyboardLayout {
+        let practised = chart.notes.filter { hands.includes($0.hand) }.map(\.midi)
+        return layout(fitting: practised) ?? layout(fitting: chart.notes.map(\.midi)) ?? .wholeKeyboard
+    }
+
+    /// Exactly the keys from the lowest of `keys` to the highest. A black key at either end brings in the white
+    /// key beside it on the outside, so no white key is cut in half. Nil without keys.
+    private static func layout(fitting keys: [Int]) -> KeyboardLayout? {
+        guard let lowest = keys.min(), let highest = keys.max() else { return nil }
+        let low = KeyboardLayout.isBlackKey(lowest) ? lowest - 1 : lowest
+        let high = KeyboardLayout.isBlackKey(highest) ? highest + 1 : highest
+        return KeyboardLayout(lowest: low, highest: high)
     }
 }
 

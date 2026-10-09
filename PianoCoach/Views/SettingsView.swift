@@ -36,11 +36,7 @@ struct SettingsView: View {
                         Text(source.displayName).tag(source)
                     }
                 }
-                if settings.noteSource == .microphone {
-                    SettingSlider(title: "Sensitivity", value: binding(\.sensitivity), range: 0...1, step: 0.05,
-                                  valueText: sensitivityText(settings.sensitivity),
-                                  minimumLabel: "Clear notes", maximumLabel: "Soft notes")
-                } else {
+                if settings.noteSource == .midiKeyboard {
                     #if os(iOS)
                     Button { showBluetoothPairing = true } label: {
                         Label("Connect a Bluetooth keyboard…", systemImage: "dot.radiowaves.left.and.right")
@@ -54,15 +50,25 @@ struct SettingsView: View {
             } header: {
                 Text("Hearing the piano")
             } footer: {
-                Text("A MIDI keyboard (USB or Bluetooth) is the most accurate: the game knows exactly which keys are pressed. The microphone works with any piano. Raise the sensitivity if soft playing is missed; lower it if the game reacts to talking or noise.")
+                Text("A MIDI keyboard (USB or Bluetooth) is the most accurate: the game knows exactly which keys are pressed. The microphone works with any piano. ")
             }
 
             Section {
+                Toggle(isOn: binding(\.microphoneMuted)) {
+                    Label("Mute microphone", systemImage: settings.microphoneMuted ? "mic.slash.fill" : "mic.fill")
+                }
+                if settings.noteSource == .microphone {
+                    SettingSlider(title: "Sensitivity", value: binding(\.sensitivity), range: 0...1, step: 0.05,
+                                  valueText: sensitivityText(settings.sensitivity),
+                                  minimumLabel: "Clear notes", maximumLabel: "Soft notes")
+                        .disabled(settings.microphoneMuted)
+                }
                 Toggle("Echo cancellation", isOn: binding(\.echoCancellation))
+                    .disabled(settings.microphoneMuted)
             } header: {
                 Text("Microphone")
             } footer: {
-                Text("Removes the app's own piano from what the microphone hears, so the game only hears your child — useful when the app plays along. It can make the piano sound a little quieter.")
+                Text("Mute stops the game and voice commands hearing anything until you turn it off or reopen the app. Lower the sensitivity if the game reacts to talking or noise; raise it if soft playing is missed. Echo cancellation removes the app's own piano from what the microphone hears — useful when the app plays along — but can make the piano sound a little quieter.")
             }
 
             Section {
@@ -78,6 +84,12 @@ struct SettingsView: View {
                 Text("Voice commands")
             } footer: {
                 Text("Your child can say “play”, “stop”, “slower” or “faster”. With “Only after Coach” on, the app waits for “Coach” first (“Coach, slower”) — useful if it reacts to normal talking.")
+            }
+
+            Section {
+                Toggle("Show Play mode", isOn: binding(\.showsPlayMode))
+            } footer: {
+                Text("Play mode (keep up with the notes and score points) is put away for now; Learn and Watch and listen work better. Turn this on to bring it back.")
             }
 
             Section {

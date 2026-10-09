@@ -34,6 +34,10 @@ final class NoteInput {
     var sensitivity: Float = 0.5 {
         didSet { analysis.setSensitivity(sensitivity) }
     }
+    /// Ignores everything the microphone hears (MIDI keyboards still play).
+    var microphoneMuted = false {
+        didSet { if microphoneMuted && noteSource == .microphone { inputLevel = 0 } }
+    }
     /// Removes the app's own piano from the microphone signal.
     var echoCancellation = false {
         didSet { if oldValue != echoCancellation, isListening, noteSource == .microphone { restartListening() } }
@@ -150,7 +154,7 @@ final class NoteInput {
     // MARK: - Notes in
 
     private func analysisDidProduce(_ onsets: [TimedOnset], levelDB: Float) {
-        guard noteSource == .microphone, isListening else { return }
+        guard noteSource == .microphone, isListening, !microphoneMuted else { return }
         // Map -60...-10 dBFS to 0...1 for the meter.
         inputLevel = max(0, min(1, (levelDB + 60) / 50))
         for timed in onsets { noteObserver?(timed.onset, timed.clockTime) }
