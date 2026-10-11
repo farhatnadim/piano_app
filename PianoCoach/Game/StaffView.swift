@@ -94,15 +94,23 @@ struct StaffScene {
         isDark ? Color(red: 0.08, green: 0.075, blue: 0.16) : Color(red: 0.945, green: 0.955, blue: 1)
     }
 
-    func draw(in context: inout GraphicsContext, size: CGSize) {
-        guard size.width > 40, size.height > 40 else { return }
-        context.clip(to: Path(CGRect(origin: .zero, size: size)))
+    /// Where the playhead stands in a view of `size`, and how far apart the beats are.
+    static func scale(size: CGSize, sheet: SheetMusic, chart: NoteChart, speed: Double)
+        -> (staff: StaffGeometry, leftEdge: CGFloat, playheadX: CGFloat, pixelsPerBeat: CGFloat) {
         let staff = StaffGeometry(size: size, maxSpacing: 22)
         let s = staff.spacing
         let leftEdge = staff.left + SheetMusicRenderer.startWidth(for: sheet, space: s)
         let playheadX = max(leftEdge + s * 3, size.width * 0.25)
-        let byTime = (staff.right - playheadX) / CGFloat(Self.visibleSeconds / chart.secondsPerBeat(atSpeed: speed))
+        let byTime = (staff.right - playheadX) / CGFloat(visibleSeconds / chart.secondsPerBeat(atSpeed: speed))
         let pixelsPerBeat = max(byTime, SheetMusicRenderer.minimumPixelsPerBeat(for: sheet, space: s))
+        return (staff, leftEdge, playheadX, pixelsPerBeat)
+    }
+
+    func draw(in context: inout GraphicsContext, size: CGSize) {
+        guard size.width > 40, size.height > 40 else { return }
+        context.clip(to: Path(CGRect(origin: .zero, size: size)))
+        let (staff, leftEdge, playheadX, pixelsPerBeat) = Self.scale(size: size, sheet: sheet, chart: chart, speed: speed)
+        let s = staff.spacing
         let x: (Double) -> CGFloat = { playheadX + CGFloat($0 - position) * pixelsPerBeat }
         let visible = (position - Double((playheadX - leftEdge) / pixelsPerBeat))...(position + Double((size.width - playheadX) / pixelsPerBeat))
 

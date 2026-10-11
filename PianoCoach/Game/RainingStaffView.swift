@@ -66,7 +66,7 @@ struct RainingStaffScene {
         context.clip(to: Path(CGRect(origin: .zero, size: size)))
         let hitY = size.height
         let secondsPerBeat = chart.secondsPerBeat(atSpeed: speed)
-        let pixelsPerBeat = hitY / CGFloat(FallingNotesScene.visibleSeconds(forHeight: size.height) / secondsPerBeat)
+        let pixelsPerBeat = FallingNotesScene.pixelsPerBeat(height: size.height, secondsPerBeat: secondsPerBeat)
         let topBeat = position + Double(hitY / pixelsPerBeat)
         func y(_ beat: Double) -> CGFloat { hitY - CGFloat(beat - position) * pixelsPerBeat }
         func x(step: Int) -> CGFloat? { layout.span(of: Self.whiteKey(forStep: step), width: size.width)?.midX }

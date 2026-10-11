@@ -153,7 +153,7 @@ struct DemoBar: View {
                 .gameHoverEffect()
                 .macKeyboardShortcut(.space)
                 .accessibilityLabel(game.isDemoPaused ? "Play" : "Pause")
-                Text(game.isDemoPaused ? "Stopped — say “play” to go on" : "Listen and watch the keys…")
+                Text(game.isDemoPaused ? "Stopped — drag the notes to look back" : "Listen and watch the keys…")
                     .font(.headline)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -220,10 +220,8 @@ struct StartPanel: View {
                     }
                     HStack(spacing: 12) {
                         modeTile(.learn, systemImage: "graduationcap.fill", explanation: "The notes wait for you")
-                        // Play mode is put away for now (Settings can bring it back).
-                        if model.settings.showsPlayMode {
-                            modeTile(.play, systemImage: "bolt.fill", explanation: "Keep up and score points")
-                        }
+                        // The game's Play mode (keep up and score points) is put away; "Play" is the piano
+                        // playing the song.
                         watchTile
                     }
                     playsOnPicker
@@ -289,9 +287,9 @@ struct StartPanel: View {
         }
     }
 
-    /// Hear and see the song played, to learn it by ear before playing.
+    /// "Play": hear and see the song played, to learn it by ear before playing.
     private var watchTile: some View {
-        tile("Watch and listen", systemImage: "ear", explanation: "Hear the song and see the keys", selected: false) {
+        tile("Play", systemImage: "play.circle.fill", explanation: "Hear the song and see the keys", selected: false) {
             game.playDemo()
         }
     }
@@ -354,18 +352,19 @@ struct StartPanel: View {
                     displayPicker
                 }
             }
-            Toggle(isOn: $game.playAlong) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("The piano plays along")
-                    Text(game.mode == .play ? "The whole song, in time with the notes"
-                                            : "Each note sounds when you play it")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+            // A piano (or a tapped key) sounds by itself; only a MIDI keyboard may be silent.
+            if game.playsOn == .piano && model.input.noteSource == .midiKeyboard {
+                Toggle(isOn: $game.playAlong) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sound the keys I play")
+                        Text("For a MIDI keyboard without its own sound")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .toggleStyle(.switch)
             }
-            .toggleStyle(.switch)
-            // In Play mode with play-along the whole song plays anyway.
-            if game.hands != .both && !(game.playAlong && game.mode == .play) {
+            if game.hands != .both {
                 Toggle("The piano plays the other hand", isOn: $game.accompanyOtherHand)
                     .toggleStyle(.switch)
             }
@@ -421,21 +420,24 @@ struct StartPanel: View {
                 Image(systemName: "hare.fill")
                     .foregroundStyle(.secondary)
             }
-            Toggle(isOn: $game.adaptiveSpeed) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Follow my speed")
-                    Text("The song goes at the pace you play")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .toggleStyle(.switch)
-            .font(.subheadline)
+            Text(speedUpText(at: speed))
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
             Text("The notes wait when you stop playing. After more than 3 mistakes in a measure, it starts again.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// How close the song is to speeding up (`GameProgress`).
+    private func speedUpText(at speed: Double) -> String {
+        let needed = GameProgress.gamesToSpeedUp
+        let target = Int((GameProgress.masteryToSpeedUp * 100).rounded())
+        let rule = "It speeds up after \(needed) games in a row at this speed with \(target) % of the notes "
+            + "clean: the right key, on time and held long enough."
+        guard let streak = model.openPiece?.game?.speedUpStreak(at: speed) else { return rule }
+        return rule + " So far: \(streak.games) of \(needed) games, \(Int((streak.mastery * 100).rounded())) % clean."
     }
 
     private var buttons: some View {
@@ -576,6 +578,13 @@ struct PausedPanel: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .buttonBorderShape(.capsule)
+                        Button { game.beginReview() } label: {
+                            Label("Look back at the notes", systemImage: "arrow.up.and.down")
+                                .frame(maxWidth: .infinity, minHeight: 36)
+                        }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .font(.headline)
                         HStack(spacing: 12) {
                             Button { game.restart() } label: {
                                 Label("Restart", systemImage: "arrow.counterclockwise")
@@ -613,8 +622,36 @@ struct PausedPanel: View {
     }
 }
 
+/// While looking back over the notes in a game: play on from where they were dragged to.
+struct ReviewBar: View {
+    let game: GameController
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("Drag the notes to look back")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Button { game.resume() } label: {
+                Label("Play from here", systemImage: "play.fill")
+                    .font(.headline)
+                    .frame(minHeight: 36)
+            }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, 8)
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: Capsule())
+        .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+    }
+}
+
 /// Stars, accuracy and counts after a game, with what happens to the level next time.
 struct ResultsPanel: View {
+    @Environment(AppModel.self) private var model
     let game: GameController
     let result: GameResult
     @State private var appeared = false
@@ -650,6 +687,11 @@ struct ResultsPanel: View {
                         }
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
+                        Text(cleanText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
                         if let message = levelMessage {
                             Label(message.text, systemImage: message.symbol)
                                 .font(.headline)
@@ -682,6 +724,15 @@ struct ResultsPanel: View {
             }
         }
         .onAppear { appeared = true }
+    }
+
+    /// The mastery that counts towards speeding up.
+    private var cleanText: String {
+        var text = "\(Int((result.mastery * 100).rounded())) % clean: the right key, on time and held long enough"
+        if result.releasedEarly > 0 {
+            text += " (\(result.releasedEarly) let go of too soon)"
+        }
+        return text
     }
 
     private var title: String {
@@ -719,6 +770,11 @@ struct ResultsPanel: View {
         case .down?:
             return ("Next time we'll go a little slower", "tortoise.fill", GameColors.leftHand)
         case .same?:
+            let needed = GameProgress.gamesToSpeedUp
+            if let streak = model.openPiece?.game?.speedUpStreak(at: game.startSpeed) {
+                return ("\(streak.games) of \(needed) games toward faster · \(Int((streak.mastery * 100).rounded())) % clean",
+                        "hand.thumbsup.fill", GameColors.rightHand)
+            }
             return ("Keep practising!", "hand.thumbsup.fill", GameColors.rightHand)
         case nil:
             return nil

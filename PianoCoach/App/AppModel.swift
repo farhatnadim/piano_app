@@ -80,7 +80,8 @@ final class AppModel {
             libraryError = "Couldn't open the library folder: \(error.localizedDescription)"
         }
         pieces = sortedPieces(store?.loadPieces() ?? [])
-        addCleanFurEliseIfNeeded()
+        addCleanSongsIfNeeded()
+        tidyLibraryOnce()
 
         game.onFinished = { [weak self] result in self?.recordGame(result) }
         voice.onCommand = { [weak self] command in self?.handle(command) }
@@ -115,9 +116,6 @@ final class AppModel {
         input.noteSource = settings.noteSource
         input.sensitivity = Float(settings.sensitivity)
         input.microphoneMuted = settings.microphoneMuted
-        if !settings.showsPlayMode && game.mode == .play && game.phase != .playing && game.phase != .paused {
-            game.mode = .learn
-        }
         input.echoCancellation = settings.echoCancellation
         voice.requireWakeWord = settings.requireWakeWord
         let wantsVoice = settings.voiceCommandsEnabled && !settings.microphoneMuted
@@ -131,24 +129,58 @@ final class AppModel {
         }
     }
 
-    /// Adds "Für Elise (clean notes)" to the library, once: exact notes for the easy tutorial, in time with
-    /// its video — to practise with, and to try the game on notes that are right.
-    private func addCleanFurEliseIfNeeded() {
-        let key = "addedCleanFurElise"
-        guard !UserDefaults.standard.bool(forKey: key), let store else { return }
-        let score = CleanFurElise.score
-        guard let attachment = try? store.importAttachment(data: MIDIFileWriter.data(for: score), fileExtension: "mid",
-                                                           originalName: "\(CleanFurElise.title).mid") else { return }
-        UserDefaults.standard.set(true, forKey: key)
-        var piece = Piece(title: CleanFurElise.title, videoID: CleanFurElise.videoID)
-        piece.sheet = attachment
-        piece.songInfo = SongInfo(origin: .sheetMusic, keyName: "A minor", tempoBPM: CleanFurElise.tempoBPM,
-                                  noteCount: score.notes.count, videoTimeOfBeatZero: CleanFurElise.videoTimeOfBeatZero)
-        if let chart = NoteChart.from(score: score, title: piece.title) {
-            piece.difficulty = ChartDifficulty.estimate(chart).level
+    /// Adds each clean song (`CleanSong.all`) to the library, once: exact notes for an easy tutorial, in time
+    /// with its video. A song already in the library with that video gets the clean notes in place of its own
+    /// (and the clean title), keeping its progress; otherwise the song is added. The themes of a medley share
+    /// a video, so each is told apart by its title.
+    private func addCleanSongsIfNeeded() {
+        guard let store else { return }
+        var added: [Piece] = []
+        for song in CleanSong.all {
+            let key = "addedCleanSong.\(song.videoID)" + (song.sharesVideo ? ".\(song.title)" : "")
+            let addedBefore = song.videoID == "tOpdCxy7N5M" && UserDefaults.standard.bool(forKey: "addedCleanFurElise")
+            guard !UserDefaults.standard.bool(forKey: key), !addedBefore else { continue }
+            let score = song.score
+            guard let attachment = try? store.importAttachment(data: MIDIFileWriter.data(for: score), fileExtension: "mid",
+                                                               originalName: "\(song.title).mid") else { continue }
+            UserDefaults.standard.set(true, forKey: key)
+            let existing = pieces.first { $0.videoID == song.videoID && (!song.sharesVideo || $0.title == song.title) }
+            var piece = existing ?? Piece(title: song.title, videoID: song.videoID)
+            if let old = piece.sheet { store.removeAttachment(old) }
+            piece.title = song.title
+            piece.sheet = attachment
+            piece.songInfo = SongInfo(origin: .sheetMusic, keyName: song.keyName, tempoBPM: song.tempoBPM,
+                                      noteCount: score.notes.count, videoTimeOfBeatZero: song.videoTimeOfBeatZero)
+            if let chart = NoteChart.from(score: score, title: piece.title) {
+                piece.difficulty = ChartDifficulty.estimate(chart).level
+            }
+            if existing != nil {
+                update(piece)
+            } else {
+                added.append(piece)
+            }
         }
-        pieces.insert(piece, at: 0)
+        guard !added.isEmpty else { return }
+        // New ones at the top, a medley's themes in order.
+        pieces.insert(contentsOf: added, at: 0)
         persist()
+    }
+
+    /// One-time library changes asked for on 2026-10-10: the learned (unclean) Für Elise goes, as the clean
+    /// one replaces it, and a new song is added.
+    private func tidyLibraryOnce() {
+        let key = "tidiedLibrary20261010"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        let unclean = pieces.filter { piece in
+            let title = piece.title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            return title.contains("fur elise") && piece.title != CleanFurElise.title
+        }
+        for piece in unclean { delete(piece) }
+        let newSong = "lQQRG3X4e0Y"
+        if !pieces.contains(where: { $0.videoID == newSong }) {
+            Task { await addPiece(link: "https://www.youtube.com/watch?v=\(newSong)", title: "") }
+        }
     }
 
     // MARK: - Library editing
@@ -498,8 +530,8 @@ final class AppModel {
     }
 
     #if DEBUG
-    /// Screenshot mode used by CI: `-screenshot-demo keys|notes|start|learn|trim|edit [landscape] [notation|furelise]`
-    /// opens a built-in song (without voice commands, so no permission prompts cover the screen).
+    /// Screenshot mode used by CI: `-screenshot-demo keys|notes|start|learn|trim|edit [landscape] [notation|furelise|<clean
+    /// song's video id>]` opens a built-in song (without voice commands, so no permission prompts cover the screen).
     private func startScreenshotDemoIfRequested() {
         let arguments = ProcessInfo.processInfo.arguments
         guard let flag = arguments.firstIndex(of: "-screenshot-demo") else { return }
@@ -525,6 +557,9 @@ final class AppModel {
             piece = test
             pieces.insert(piece, at: 0)
         } else if scene.contains("furelise"), let clean = pieces.first(where: { $0.title == CleanFurElise.title }) {
+            piece = clean
+        } else if let song = CleanSong.all.first(where: { scene.contains($0.videoID) }),
+                  let clean = pieces.first(where: { $0.videoID == song.videoID && $0.title == song.title }) {
             piece = clean
         } else if let existing = pieces.first(where: { $0.title == DemoSong.title }) {
             piece = existing

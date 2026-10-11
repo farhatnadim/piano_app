@@ -37,7 +37,7 @@ enum PlayInstrument: String, CaseIterable, Identifiable {
 
 /// Feedback drawn on a piano key.
 enum KeyGlow: Equatable {
-    /// Played by the "Watch and listen" demo.
+    /// Played by the "Play" playback (the piano playing the song).
     case pressed
     /// The right note, on time.
     case correct
@@ -90,15 +90,20 @@ final class GameController {
         didSet { UserDefaults.standard.set(display.rawValue, forKey: GameDisplay.storageKey) }
     }
     var showLetters = true
-    var adaptiveSpeed = true
+    /// The speed follows the player's pace during a game. Off: the speed changes between games instead
+    /// (`GameProgress`), or by hand.
+    var adaptiveSpeed = false
     /// Play the hand that isn't being practised with the built-in piano.
     var accompanyOtherHand = true
     /// The built-in piano plays along: in Play mode the whole song, in time with the notes; in Learn mode
     /// (where the notes wait) each note as it is played right. On unless turned off; remembered.
-    var playAlong: Bool = UserDefaults.standard.object(forKey: GameController.playAlongKey) as? Bool ?? true {
+    ///
+    /// Off by default: a piano already sounds what the child plays, so the iPad playing it again was heard
+    /// as every note sounding twice. Only a MIDI keyboard without its own sound needs it.
+    var playAlong: Bool = UserDefaults.standard.object(forKey: GameController.playAlongKey) as? Bool ?? false {
         didSet { UserDefaults.standard.set(playAlong, forKey: Self.playAlongKey) }
     }
-    static let playAlongKey = "playAlong"
+    static let playAlongKey = "soundsPlayedKeys"
     /// Speed the next game starts at (the child's level for this song).
     var startSpeed: Double = 0.6
     /// A real piano, or the keys on the screen (the microphone then stays out of the game). Remembered.
@@ -117,6 +122,9 @@ final class GameController {
     @ObservationIgnored private(set) var sheetMusic: SheetMusic?
     /// The Watch playback is stopped where it is (a voice "stop" or the pause button).
     private(set) var isDemoPaused = false
+    /// Stopped to look back over the notes: dragging them moves the playhead (`review(to:)`), and playing
+    /// goes on from where it was left.
+    private(set) var isReviewing = false
     private(set) var difficulty: ChartDifficulty?
     /// Playhead in beats: notes whose time equals it are at the line.
     private(set) var position: Double = 0
@@ -185,6 +193,8 @@ final class GameController {
     @ObservationIgnored private var lastFrame: Double = 0
     @ObservationIgnored private var demoStarted: Set<Int> = []
     @ObservationIgnored private var demoEnded: Set<Int> = []
+    /// Per key, the song time the Watch playback last struck it.
+    @ObservationIgnored private var demoStruck: [Int: Double] = [:]
     @ObservationIgnored private var accompanied: Set<Int> = []
     @ObservationIgnored private var accompanimentEnded: Set<Int> = []
     /// Where the playhead was when the accompaniment last looked (to notice it going back).
@@ -195,6 +205,10 @@ final class GameController {
     /// Per key, which sounding of it is current (a later hit on the same key outlives an earlier one's release).
     @ObservationIgnored private var soundTokens: [Int: Int] = [:]
     @ObservationIgnored private var soundCounter = 0
+    /// Reviewing a game: how far it had got (the notes can't be dragged further on than that).
+    @ObservationIgnored private var reviewLimit: Double = 0
+    /// When "Hold the note longer" was last shown (so it doesn't nag).
+    @ObservationIgnored private var holdCheerAt: Double = -.infinity
 
     init(input: NoteInput, sound: GameSoundPlayer) {
         self.input = input
@@ -283,6 +297,7 @@ final class GameController {
 
     func pause() {
         guard phase == .playing || isCountingIn else { return }
+        isReviewing = false
         countInTask?.cancel()
         engine?.pause(at: MonotonicClock.now())
         sound.allNotesOff()
@@ -291,6 +306,7 @@ final class GameController {
 
     func resume() {
         guard phase == .paused, let engine else { return }
+        if isReviewing { playFromReview(engine) }
         // The app may have stopped the listener and the piano meanwhile (e.g. it went to the background).
         if hearsPiano && !input.isListening { input.startListening() }
         if needsSound { try? sound.start() }
@@ -316,6 +332,7 @@ final class GameController {
         detachInput()
         sound.allNotesOff()
         engine = nil
+        isReviewing = false
         isWaiting = false
         upcomingKeys = [:]
         catchUpOrder = [:]
@@ -363,6 +380,7 @@ final class GameController {
             return
         }
         demoStarted = []
+        demoStruck = [:]
         demoEnded = []
         isDemoPaused = false
         statuses = chart.notes.map { _ in .pending }
@@ -380,6 +398,7 @@ final class GameController {
         keyGlows = [:]
         glowUntil = [:]
         isDemoPaused = false
+        isReviewing = false
         phase = chart == nil ? .noChart : .ready
         position = firstNoteTime - 4
     }
@@ -388,11 +407,20 @@ final class GameController {
     func pauseDemo() {
         guard phase == .demo, !isDemoPaused else { return }
         isDemoPaused = true
+        isReviewing = false
         sound.allNotesOff()
     }
 
     func resumeDemo() {
         guard phase == .demo, isDemoPaused else { return }
+        if isReviewing, let chart {
+            // Go on from where the notes were dragged to: what's before it doesn't sound again.
+            let earlier = Set(chart.notes.filter { $0.time < position - 1e-6 }.map(\.id))
+            demoStarted = earlier
+            demoStruck = [:]
+            demoEnded = earlier
+            isReviewing = false
+        }
         isDemoPaused = false
         try? sound.start()
         lastFrame = MonotonicClock.now()
@@ -400,6 +428,51 @@ final class GameController {
 
     func toggleDemoPause() {
         if isDemoPaused { resumeDemo() } else { pauseDemo() }
+    }
+
+    // MARK: - Looking back
+
+    /// Whether the notes can be dragged to look back over them: while a game or the Watch playback is on.
+    var canReview: Bool {
+        switch phase {
+        case .playing, .paused, .demo: return chart != nil
+        default: return false
+        }
+    }
+
+    /// The notes were grabbed: stops where they are (a game pauses, Watch stops) to look back.
+    func beginReview() {
+        guard canReview, !isReviewing else { return }
+        if phase == .demo {
+            pauseDemo()
+            reviewLimit = chart.map { $0.endBeat } ?? position
+        } else {
+            if phase == .playing { pause() }
+            reviewLimit = position
+        }
+        isReviewing = true
+    }
+
+    /// Moves the notes to `beat` while looking back: no earlier than the lead-in, no later than the game had got.
+    func review(to beat: Double) {
+        guard isReviewing else { return }
+        let earliest = firstNoteTime - (phase == .demo ? 2 : 4)
+        position = max(earliest, min(reviewLimit, beat))
+        if let chart { progress = max(0, min(1, position / max(0.001, chart.endBeat))) }
+    }
+
+    /// Ends a look back in a game: the notes from where they were left on are to play again.
+    private func playFromReview(_ engine: GameEngine) {
+        isReviewing = false
+        guard position < reviewLimit - 1e-6 else { return }
+        sound.allNotesOff()
+        engine.rewind(to: position, at: MonotonicClock.now())
+        statuses = engine.statuses
+        position = engine.position
+        if let chart {
+            for note in chart.notes where note.time >= position - 1e-9 { hitTimes[note.id] = nil }
+        }
+        lastSounded = nil
     }
 
     // MARK: - Voice commands
@@ -450,13 +523,20 @@ final class GameController {
     // MARK: - Input
 
     /// A key pressed on the on-screen keyboard (or the Mac's keyboard): sounds it and plays it into the game.
-    func tapKey(_ midi: Int) {
+    /// `heldUntilReleased`: the key sounds until `releaseKey` (and the game checks it was held long enough);
+    /// otherwise it sounds for a moment.
+    func tapKey(_ midi: Int, heldUntilReleased: Bool = false) {
         try? sound.start()
         sound.noteOn(midi, velocity: 0.7)
-        let release = midi
+        soundCounter += 1
+        let token = soundCounter
+        soundTokens[midi] = token
+        // Held: a safety stop in case the release never comes.
+        let seconds: UInt64 = heldUntilReleased ? 8_000_000_000 : 350_000_000
         Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 350_000_000)
-            self?.sound.noteOff(release)
+            try? await Task.sleep(nanoseconds: seconds)
+            guard let self, self.soundTokens[midi] == token else { return }
+            self.sound.noteOff(midi)
         }
         guard phase == .playing, let engine else { return }
         let now = MonotonicClock.now()
@@ -469,8 +549,24 @@ final class GameController {
         consumeEvents(soundHits: false)
     }
 
+    /// A key held on the screen (or the Mac's keyboard) was let go of.
+    func releaseKey(_ midi: Int) {
+        soundCounter += 1
+        soundTokens[midi] = soundCounter
+        sound.noteOff(midi)
+        guard phase == .playing, let engine else { return }
+        engine.release(midi: midi, at: MonotonicClock.now())
+        consumeEvents(soundHits: false)
+    }
+
     private func attachInput() {
         input.noteObserver = { [weak self] onset, clock in self?.heard(onset, at: clock) }
+        // A MIDI keyboard says when a key comes up: whether the note was held long enough.
+        input.keyObserver = { [weak self] midi, isDown in
+            guard let self, !isDown, self.phase == .playing, self.hearsPiano, let engine = self.engine else { return }
+            engine.release(midi: midi, at: MonotonicClock.now())
+            self.consumeEvents()
+        }
         if hearsPiano {
             if !input.isListening { input.startListening() }
         } else if input.isListening {
@@ -541,9 +637,12 @@ final class GameController {
             engine.update(to: now)
             // The microphone listens for the keys the game waits for (and judges any other key strictly).
             if hearsPiano && phase == .playing { input.expectedKeys = engine.listeningPitches }
-            position = engine.position
+            // Looking back, the notes are where they were dragged to.
+            if !isReviewing {
+                position = engine.position
+                progress = engine.progress
+            }
             speed = engine.speed
-            progress = engine.progress
             isWaiting = engine.isWaiting
             upcomingKeys = Self.hints(for: engine, chart: chart, speed: speed)
             let order = Self.catchUpOrder(for: engine, chart: chart, speed: speed)
@@ -589,6 +688,12 @@ final class GameController {
                     for note in chart.notes where note.time >= fromBeat - 1e-9 { hitTimes[note.id] = nil }
                 }
                 showCheer("Let's try that measure again!")
+            case .releasedEarly(_, let midi):
+                glow(midi, .early, for: 0.4)
+                if now - holdCheerAt > 6 {
+                    holdCheerAt = now
+                    showCheer("Hold the note a little longer")
+                }
             case .finished:
                 finish()
             }
@@ -603,10 +708,10 @@ final class GameController {
         let outcome = engine.result
         result = outcome
         levelChange = onFinished?(outcome)
-        // The next game starts at the new level ("Level up! Next time: 70 %").
+        // The next game starts at the level: where this one started, or faster ("Level up! Next time: 70 %").
         switch levelChange {
         case .up(let next)?, .down(let next)?: startSpeed = next
-        default: startSpeed = max(0.3, min(1.2, outcome.endSpeed))
+        default: startSpeed = max(0.3, min(1.2, outcome.startSpeed))
         }
         phase = .finished
         stopTimer()
@@ -659,7 +764,7 @@ final class GameController {
     /// Learn mode with play-along: sounds the notes just played right, for as long as they're written
     /// (at the speed being played, at most two seconds).
     private func soundPlayedNotes(_ notes: [ChartNote]) {
-        guard playAlong, mode == .learn, !notes.isEmpty, let chart else { return }
+        guard playAlong, mode == .learn, input.noteSource == .midiKeyboard, !notes.isEmpty, let chart else { return }
         try? sound.start()
         let secondsPerBeat = chart.secondsPerBeat(atSpeed: speed)
         for note in notes {
@@ -719,6 +824,12 @@ final class GameController {
             if note.time > position { break }
             if !demoStarted.contains(note.id) {
                 demoStarted.insert(note.id)
+                // The same key written twice at (almost) the same moment sounds once.
+                if let struck = demoStruck[note.midi], abs(struck - note.time) < 0.1 {
+                    demoEnded.insert(note.id)
+                    continue
+                }
+                demoStruck[note.midi] = note.time
                 sound.noteOn(note.midi, velocity: Float(note.velocity ?? (note.hand == .right ? 0.75 : 0.55)))
                 glow(note.midi, .pressed, for: min(0.6, note.duration * chart.secondsPerBeat(atSpeed: speed)))
             }

@@ -87,12 +87,6 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle("Show Play mode", isOn: binding(\.showsPlayMode))
-            } footer: {
-                Text("Play mode (keep up with the notes and score points) is put away for now; Learn and Watch and listen work better. Turn this on to bring it back.")
-            }
-
-            Section {
                 Button("Reset listening settings", role: .destructive) { confirmReset = true }
             } footer: {
                 Text("Piano sound: Fluid R3 grand piano by Frank Wen (CC BY 3.0). Notes are written down with Spotify's Basic Pitch (Apache 2.0).")

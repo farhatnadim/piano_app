@@ -12,14 +12,18 @@ public struct GameRecord: Codable, Hashable, Sendable {
     public var date: Date
     public var mode: GameMode
     public var hands: HandSelection
+    /// The slowest speed of the game (older records: the speed it ended at).
     public var speed: Double
     public var accuracy: Double
     public var stars: Int
     public var score: Int
     public var completed: Bool
+    /// See `GameResult.mastery`; nil for games recorded before it was measured.
+    public var mastery: Double?
 
     public init(date: Date, mode: GameMode, hands: HandSelection, speed: Double, accuracy: Double,
-                stars: Int, score: Int, completed: Bool) {
+                stars: Int, score: Int, completed: Bool, mastery: Double? = nil) {
+        self.mastery = mastery
         self.date = date
         self.mode = mode
         self.hands = hands
@@ -58,33 +62,54 @@ public struct GameProgress: Codable, Hashable, Sendable {
     /// The level shown to the child: speed in tens of percent (60 % = level 6).
     public var level: Int { Int((speed * 10).rounded()) }
 
-    /// Records a finished game and moves the starting speed: up after a great game at (or above) the
-    /// current level, down after a hard one, otherwise to where adaptive speed ended.
+    /// Games in a row at the starting speed whose average mastery decides a speed-up.
+    public static let gamesToSpeedUp = 4
+    /// Average mastery over those games needed to speed up.
+    public static let masteryToSpeedUp = 0.95
+    public static let speedUpStep = 0.1
+
+    /// Records a finished game. The speed never changes because of one game: the speed the player chose to
+    /// start it at becomes their level, and after `gamesToSpeedUp` games in a row at (or above) that speed
+    /// with an average mastery of `masteryToSpeedUp`, the next game starts `speedUpStep` faster.
     @discardableResult
     public mutating func record(_ result: GameResult, date: Date = Date()) -> LevelChange {
         gamesPlayed += 1
         bestScore = max(bestScore, result.score)
         bestStars = max(bestStars, result.stars)
         bestAccuracy = max(bestAccuracy, result.accuracy)
-        history.append(GameRecord(date: date, mode: result.mode, hands: result.hands, speed: result.endSpeed,
-                                  accuracy: result.accuracy, stars: result.stars, score: result.score,
-                                  completed: result.completed))
+        history.append(GameRecord(date: date, mode: result.mode, hands: result.hands,
+                                  speed: min(result.startSpeed, result.lowestSpeed), accuracy: result.accuracy,
+                                  stars: result.stars, score: result.score, completed: result.completed,
+                                  mastery: result.mastery))
         if history.count > Self.historyLimit { history.removeFirst(history.count - Self.historyLimit) }
 
         let old = speed
-        var next: Double
-        if result.completed && result.accuracy >= 0.9 && result.endSpeed >= speed - 0.051 {
-            next = max(speed, result.endSpeed) + 0.1
-        } else if result.accuracy < 0.5 {
-            next = min(speed, result.endSpeed) - 0.1
-        } else {
-            next = result.endSpeed
+        speed = Self.steps(result.startSpeed)
+        if let streak = speedUpStreak(at: speed), streak.games >= Self.gamesToSpeedUp,
+           streak.mastery >= Self.masteryToSpeedUp {
+            speed = Self.steps(speed + Self.speedUpStep)
         }
-        next = (max(Self.minSpeed, min(Self.maxSpeed, next)) * 20).rounded() / 20   // steps of 5 %
-        speed = next
-        if next > old + 0.001 { return .up(to: next) }
-        if next < old - 0.001 { return .down(to: next) }
+        if speed > old + 0.001 { return .up(to: speed) }
+        if speed < old - 0.001 { return .down(to: speed) }
         return .same
+    }
+
+    /// The latest games in a row played to the end at `speed` or faster (at most `gamesToSpeedUp`), with their
+    /// average mastery; nil when the last game doesn't count.
+    public func speedUpStreak(at speed: Double) -> (games: Int, mastery: Double)? {
+        var masteries: [Double] = []
+        for record in history.reversed() {
+            guard masteries.count < Self.gamesToSpeedUp, record.completed, let mastery = record.mastery,
+                  record.speed >= speed - 0.001 else { break }
+            masteries.append(mastery)
+        }
+        guard !masteries.isEmpty else { return nil }
+        return (masteries.count, masteries.reduce(0, +) / Double(masteries.count))
+    }
+
+    /// Within the limits, in steps of 5 %.
+    private static func steps(_ value: Double) -> Double {
+        (max(minSpeed, min(maxSpeed, value)) * 20).rounded() / 20
     }
 }
 

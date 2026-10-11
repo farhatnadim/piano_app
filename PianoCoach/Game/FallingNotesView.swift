@@ -50,12 +50,17 @@ struct FallingNotesScene {
         min(4, max(3, Double(height) / 170))
     }
 
+    /// How far a beat is down a view `height` tall (also the upright staff's scale).
+    static func pixelsPerBeat(height: CGFloat, secondsPerBeat: Double) -> CGFloat {
+        height / CGFloat(visibleSeconds(forHeight: height) / secondsPerBeat)
+    }
+
     func draw(in context: inout GraphicsContext, size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
         context.clip(to: Path(CGRect(origin: .zero, size: size)))
         let hitY = size.height
         let secondsPerBeat = chart.secondsPerBeat(atSpeed: speed)
-        let pixelsPerBeat = hitY / CGFloat(Self.visibleSeconds(forHeight: size.height) / secondsPerBeat)
+        let pixelsPerBeat = Self.pixelsPerBeat(height: size.height, secondsPerBeat: secondsPerBeat)
         let topBeat = position + Double(hitY / pixelsPerBeat)
         func y(_ beat: Double) -> CGFloat { hitY - CGFloat(beat - position) * pixelsPerBeat }
 

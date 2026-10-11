@@ -23,7 +23,7 @@ struct GameScreen: View {
         .focusable(interactions: .edit)
         .focused($hasKeyboardFocus)
         .focusEffectDisabled()
-        .onKeyPress(phases: .down) { press in handle(press) }
+        .onKeyPress(phases: [.down, .up]) { press in handle(press) }
         .onAppear { hasKeyboardFocus = true }
         .onChange(of: game.phase) { hasKeyboardFocus = true }
     }
@@ -55,9 +55,11 @@ struct GameScreen: View {
             return .ignored
         }
         if let character = press.characters.lowercased().first, let midi = Self.computerKeys[character] {
-            game.tapKey(midi)
+            // Held like a piano key: it sounds (and counts as held) until it comes up.
+            if press.phase == .up { game.releaseKey(midi) } else { game.tapKey(midi, heldUntilReleased: true) }
             return .handled
         }
+        guard press.phase == .down else { return .ignored }
         #if os(iOS)
         if press.key == .space {
             spaceBar(game)
@@ -134,6 +136,14 @@ private struct PlayArea: View {
                     .padding(.top, 12)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay { NoteReviewSurface(game: game, chart: chart, display: display) }
+                .overlay(alignment: .bottom) {
+                    if game.isReviewing && game.phase == .paused {
+                        ReviewBar(game: game)
+                            .padding(.bottom, 16)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
                 .overlay(alignment: .topTrailing) {
                     KeyboardZoomPicker()
                         .padding(10)
@@ -209,7 +219,8 @@ private struct GameKeyboard: View {
     var body: some View {
         PianoKeyboardView(layout: layout, glows: game.keyGlows, hints: game.upcomingKeys, now: game.frameTime,
                           showLetters: game.showLetters, catchUp: game.catchUpKeys,
-                          onPress: { game.tapKey($0) })
+                          onPress: { game.tapKey($0, heldUntilReleased: true) },
+                          onRelease: { game.releaseKey($0) })
     }
 }
 
@@ -224,8 +235,11 @@ private struct PhaseOverlay: View {
                 CountInOverlay(number: number)
                     .transition(.opacity)
             case .paused:
-                PausedPanel(game: game)
-                    .transition(.opacity)
+                // Looking back over the notes: they stay in view (`ReviewBar` plays on from there).
+                if !game.isReviewing {
+                    PausedPanel(game: game)
+                        .transition(.opacity)
+                }
             case .finished:
                 if let result = game.result {
                     ResultsPanel(game: game, result: result)
@@ -236,5 +250,49 @@ private struct PhaseOverlay: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: game.phase)
+    }
+}
+
+/// Over the notes: grabbing them stops the game (or the Watch playback) to look back. The notes follow the
+/// finger: pulled up (or right, on the staff) they go back in the song, pushed down they come forward again,
+/// no further than where the game had got.
+private struct NoteReviewSurface: View {
+    let game: GameController
+    let chart: NoteChart
+    let display: GameDisplay
+
+    /// Where the notes were when the finger came down.
+    @State private var grabbedAt: Double?
+
+    var body: some View {
+        GeometryReader { geo in
+            Color.clear
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 12)
+                        .onChanged { value in drag(value.translation, size: geo.size) }
+                        .onEnded { _ in grabbedAt = nil }
+                )
+        }
+        .allowsHitTesting(game.canReview)
+        .accessibilityHidden(true)
+    }
+
+    private func drag(_ translation: CGSize, size: CGSize) {
+        if grabbedAt == nil {
+            game.beginReview()
+            grabbedAt = game.position
+        }
+        guard let start = grabbedAt, game.isReviewing else { return }
+        let secondsPerBeat = chart.secondsPerBeat(atSpeed: game.startSpeed)
+        switch display {
+        case .keys, .rain:
+            let pixelsPerBeat = FallingNotesScene.pixelsPerBeat(height: size.height, secondsPerBeat: secondsPerBeat)
+            game.review(to: start + Double(translation.height / max(1, pixelsPerBeat)))
+        case .notes:
+            let sheet = game.sheetMusic ?? SheetMusic(chart: chart)
+            let pixelsPerBeat = StaffScene.scale(size: size, sheet: sheet, chart: chart, speed: game.startSpeed).pixelsPerBeat
+            game.review(to: start - Double(translation.width / max(1, pixelsPerBeat)))
+        }
     }
 }

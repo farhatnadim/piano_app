@@ -80,20 +80,6 @@ final class AppSettings {
         }
     }
 
-    @ObservationIgnored private var _showsPlayMode: Bool
-    /// Offer Play mode (keep up and score points) next to Learn. Off: put away for now, as Learn and
-    /// "Watch and listen" work better; the mode itself is kept.
-    var showsPlayMode: Bool {
-        get {
-            access(keyPath: \.showsPlayMode)
-            return _showsPlayMode
-        }
-        set {
-            withMutation(keyPath: \.showsPlayMode) { _showsPlayMode = newValue }
-            defaults.set(newValue, forKey: "showsPlayMode")
-        }
-    }
-
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         _noteSource = NoteSource(rawValue: defaults.string(forKey: "noteSource") ?? "") ?? .microphone
@@ -101,7 +87,6 @@ final class AppSettings {
         _echoCancellation = defaults.object(forKey: "echoCancellation") as? Bool ?? false
         _voiceCommandsEnabled = defaults.object(forKey: "voiceCommandsEnabled") as? Bool ?? true
         _requireWakeWord = defaults.object(forKey: "requireWakeWord") as? Bool ?? false
-        _showsPlayMode = defaults.object(forKey: "showsPlayMode") as? Bool ?? false
     }
 
     func resetListeningDefaults() {

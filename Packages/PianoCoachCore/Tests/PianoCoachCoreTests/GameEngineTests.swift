@@ -114,12 +114,12 @@ final class GameEngineTests: XCTestCase {
         XCTAssertTrue(engine.isWaiting)
         XCTAssertEqual(engine.upcomingNotes.map(\.midi), [64])
         XCTAssertEqual(engine.statuses[3], .pending, "the F is still to come")
-        // Played ahead in order, a note counts before it reaches the line.
+        // Played ahead in order, a note counts before it reaches the line (though not as on time).
         engine.handle(midiOnset([64], at: clock), at: clock)
         clock += 0.05
         engine.update(to: clock)
         engine.handle(midiOnset([65], at: clock), at: clock)
-        XCTAssertEqual(engine.statuses[3], .hit(.perfect))
+        XCTAssertEqual(engine.statuses[3], .hit(.good))
     }
 
     func testLearnModeTimeSpentPausedDoesNotCountAsWaiting() {
@@ -399,25 +399,121 @@ final class GameEngineTests: XCTestCase {
         XCTAssertEqual(engine.position(at: 0.3), p2, accuracy: 1e-9)
     }
 
-    func testProgressLevelsUpAfterAGreatGameAndDownAfterAHardOne() {
+    private func result(mastery: Double, start: Double = 0.6, lowest: Double? = nil,
+                        completed: Bool = true) -> GameResult {
+        GameResult(score: 1000, maxCombo: 10, perfect: 10, good: 0, missed: 0, wrongNotes: 0, accuracy: mastery,
+                   stars: GameResult.stars(forAccuracy: mastery), startSpeed: start, endSpeed: start, mode: .learn,
+                   hands: .both, completed: completed, mastery: mastery, lowestSpeed: lowest ?? start)
+    }
+
+    func testProgressSpeedsUpOnlyAfterSeveralCleanGames() {
         var progress = GameProgress(speed: 0.6)
         XCTAssertEqual(progress.level, 6)
-        func result(accuracy: Double, end: Double, completed: Bool = true) -> GameResult {
-            GameResult(score: 1000, maxCombo: 10, perfect: 10, good: 0, missed: 0, wrongNotes: 0, accuracy: accuracy,
-                       stars: GameResult.stars(forAccuracy: accuracy), startSpeed: 0.6, endSpeed: end, mode: .play,
-                       hands: .both, completed: completed)
-        }
-        XCTAssertEqual(progress.record(result(accuracy: 0.95, end: 0.6)), .up(to: 0.7))
+        // One perfect game isn't enough, and a weak one doesn't slow the song down.
+        XCTAssertEqual(progress.record(result(mastery: 1)), .same)
+        XCTAssertEqual(progress.record(result(mastery: 0.3)), .same)
+        XCTAssertEqual(progress.speed, 0.6, accuracy: 1e-9)
+        // Four in a row averaging 95 % do it.
+        XCTAssertEqual(progress.record(result(mastery: 0.96)), .same)
+        XCTAssertEqual(progress.record(result(mastery: 0.94)), .same)
+        XCTAssertEqual(progress.record(result(mastery: 0.97)), .same)
+        XCTAssertEqual(progress.speedUpStreak(at: 0.6)?.games, 4)
+        XCTAssertEqual(progress.record(result(mastery: 0.95)), .up(to: 0.7))
         XCTAssertEqual(progress.level, 7)
+        // The streak starts again at the new speed.
+        XCTAssertNil(progress.speedUpStreak(at: 0.7))
+        XCTAssertEqual(progress.gamesPlayed, 6)
         XCTAssertEqual(progress.bestStars, 3)
-        XCTAssertEqual(progress.record(result(accuracy: 0.4, end: 0.65)), .down(to: 0.55))
-        XCTAssertEqual(progress.record(result(accuracy: 0.8, end: 0.55)), .same)
-        XCTAssertEqual(progress.gamesPlayed, 3)
-        XCTAssertEqual(progress.history.count, 3)
+    }
+
+    func testProgressStreakBreaksWhenTheGameWasSlowedDown() {
+        var progress = GameProgress(speed: 0.6)
+        for _ in 0..<3 { progress.record(result(mastery: 1)) }
+        // Slowed down by hand during the game: it doesn't count at 60 %, and breaks the streak.
+        progress.record(result(mastery: 1, lowest: 0.5))
+        XCTAssertEqual(progress.speed, 0.6, accuracy: 1e-9)
+        XCTAssertNil(progress.speedUpStreak(at: 0.6))
+        for _ in 0..<3 { XCTAssertEqual(progress.record(result(mastery: 1)), .same) }
+        XCTAssertEqual(progress.record(result(mastery: 1)), .up(to: 0.7))
+    }
+
+    func testProgressTakesTheChosenStartingSpeedAsTheLevel() {
+        var progress = GameProgress(speed: 0.6)
+        XCTAssertEqual(progress.record(result(mastery: 0.5, start: 0.5)), .down(to: 0.5))
         // Never beyond the limits.
         progress.speed = 1.2
-        XCTAssertEqual(progress.record(result(accuracy: 1, end: 1.2)), .same)
+        for _ in 0..<4 { XCTAssertEqual(progress.record(result(mastery: 1, start: 1.2)), .same) }
         XCTAssertEqual(progress.speed, 1.2, accuracy: 1e-9)
+    }
+
+    func testLearnModeCountsRushingAheadAsNotOnTime() {
+        var config = GameConfiguration()
+        config.adaptiveSpeed = false
+        let engine = GameEngine(chart: chart, configuration: config)
+        engine.start(at: 0)
+        engine.update(to: 0.1)
+        let first = engine.upcomingNotes.map(\.midi)
+        // Played a whole second before the first note reaches the line.
+        engine.handle(midiOnset(first, at: 0.1), at: 0.1)
+        let hits = engine.takeEvents().compactMap { event -> Judgement? in
+            if case .hit(_, _, let judgement, _) = event { return judgement } else { return nil }
+        }
+        XCTAssertEqual(hits.first, .good)
+    }
+
+    func testLettingGoOfALongNoteTooSoonCostsMastery() {
+        // Whole notes at 60 BPM: four seconds each at full speed.
+        let notes = (0..<4).map { ChartNote(id: $0, midi: 60 + $0, time: Double($0 * 4), duration: 4, hand: .right) }
+        let long = NoteChart(title: "long", notes: notes, beatsPerMinute: 60, source: .score)
+        var config = GameConfiguration()
+        config.adaptiveSpeed = false
+        config.startSpeed = 1
+        let engine = GameEngine(chart: long, configuration: config)
+        var clock = 0.0
+        engine.start(at: clock)
+        var events: [GameEvent] = []
+        while !engine.isFinished && clock < 60 {
+            clock += 1.0 / 60
+            engine.update(to: clock)
+            if engine.isWaiting, let next = engine.upcomingNotes.first {
+                engine.handle(midiOnset([next.midi], at: clock), at: clock)
+                // The first note is let go of after half a second; the others are held.
+                let holdFor = next.id == 0 ? 0.5 : 3.5
+                let note = next.midi
+                for _ in 0..<Int(holdFor * 60) {
+                    clock += 1.0 / 60
+                    engine.update(to: clock)
+                    events += engine.takeEvents()
+                }
+                engine.release(midi: note, at: clock)
+            }
+            events += engine.takeEvents()
+        }
+        XCTAssertTrue(engine.isFinished)
+        XCTAssertTrue(events.contains(.releasedEarly(noteID: 0, midi: 60)))
+        XCTAssertEqual(engine.result.releasedEarly, 1)
+        XCTAssertEqual(engine.result.mastery, 0.75, accuracy: 1e-9)
+    }
+
+    func testRewindPlaysTheNotesAgainWithoutCountingMistakes() {
+        var config = GameConfiguration()
+        config.adaptiveSpeed = false
+        let engine = GameEngine(chart: chart, configuration: config)
+        simulate(engine, seconds: 8, reaction: { _ in 0.05 })
+        let played = engine.statuses.filter { if case .hit = $0 { return true } else { return false } }.count
+        XCTAssertGreaterThan(played, 4)
+        let firstTime = chart.notes[0].time
+        engine.rewind(to: firstTime, at: 200)
+        XCTAssertEqual(engine.position, firstTime, accuracy: 1e-9)
+        XCTAssertEqual(engine.stats.hits, 0)
+        XCTAssertFalse(engine.statuses.contains { if case .hit = $0 { return true } else { return false } })
+        // Never back past the lead-in.
+        engine.rewind(to: -1000, at: 201)
+        XCTAssertGreaterThan(engine.position, -1000)
+        // Played through again, it's a clean game.
+        simulate(engine, seconds: 120, reaction: { _ in 0.05 })
+        XCTAssertTrue(engine.isFinished)
+        XCTAssertEqual(engine.result.mastery, 1, accuracy: 1e-9)
     }
 
     func testDifficultyRanksDenseTwoHandedMusicHigher() {

@@ -72,6 +72,8 @@ public enum GameEvent: Equatable, Sendable {
     case speedChanged(from: Double, to: Double)
     /// Too many mistakes in a measure: the game went back to the start of it (`fromBeat`) to try it again.
     case measureRestarted(fromBeat: Double)
+    /// A played note's key was let go of well before the note's written length (MIDI keyboard or screen keys).
+    case releasedEarly(noteID: Int, midi: Int)
     case finished
 }
 
@@ -109,6 +111,13 @@ public struct GameConfiguration: Equatable, Sendable {
     public var leadInSeconds: Double = 3
     /// Microphone: similarity (0...1) between the sound and the expected chord needed to count it as played.
     public var chordSimilarity: Float = 0.5
+    /// A note counts as held long enough when its key stays down for this fraction of its written length
+    /// (at the speed played), up to `longestHoldChecked` seconds. Only keys that report being let go are
+    /// checked (a MIDI keyboard, the screen's keys), and only notes written at least `shortestHoldChecked`
+    /// seconds long: a quick note may be let go of at once.
+    public var holdFraction: Double = 0.7
+    public var shortestHoldChecked: Double = 0.4
+    public var longestHoldChecked: Double = 2.5
 
     public init() {}
 }
@@ -142,6 +151,13 @@ public struct GameResult: Codable, Equatable, Sendable {
     public var hands: HandSelection
     /// The song was played to the end.
     public var completed: Bool
+    /// 0...1: the notes played cleanly — the right key, on time, held long enough — with wrong notes counting
+    /// against it as in `accuracy`. Over several games this decides when the song speeds up (`GameProgress`).
+    public var mastery: Double = 0
+    /// Notes whose key was let go of too soon.
+    public var releasedEarly: Int = 0
+    /// The slowest speed the game was set to (by hand, or following the player).
+    public var lowestSpeed: Double = 0
 
     public static func stars(forAccuracy accuracy: Double) -> Int {
         accuracy >= 0.9 ? 3 : accuracy >= 0.75 ? 2 : accuracy >= 0.5 ? 1 : 0

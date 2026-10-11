@@ -56,6 +56,14 @@ public final class GameEngine {
     /// Notes missed and then played again after their measure started over (they still cost accuracy).
     private var retriedMisses = 0
     private let measureStarts: [Double]
+    /// Where the playhead starts (the lead-in): as far back as `rewind` goes.
+    private let startPosition: Double
+    /// Notes played whose key is still down, by key: the note and when it was struck.
+    private var held: [Int: (note: Int, clock: Double)] = [:]
+    /// Notes whose key was let go of too soon.
+    private var releasedEarly: Set<Int> = []
+    /// The slowest speed set so far.
+    private var lowestSpeed: Double
 
     public init(chart: NoteChart, configuration: GameConfiguration = GameConfiguration()) {
         self.chart = chart
@@ -65,6 +73,7 @@ public final class GameEngine {
         speed = start
         targetSpeed = start
         announcedSpeed = start
+        lowestSpeed = start
         statuses = chart.notes.map { configuration.hands.includes($0.hand) ? .pending : .notRequired }
         chords = chart.chords
             .map { $0.filter { configuration.hands.includes($0.hand) }.map(\.id) }
@@ -73,6 +82,7 @@ public final class GameEngine {
         measureStarts = chart.barLines.filter(\.isFinite).sorted()
         let firstTime = chords.first.map { chart.notes[$0[0]].time } ?? 0
         position = firstTime - configuration.leadInSeconds / chart.secondsPerBeat(atSpeed: start)
+        startPosition = position
     }
 
     // MARK: - Running
@@ -100,12 +110,15 @@ public final class GameEngine {
         if isRunning { pausedAtClock = clock }
         isRunning = false
         lastClock = nil
+        // Letting go of a key during the pause isn't letting go too soon.
+        held.removeAll()
     }
 
     /// Changes the target speed by hand (the game eases into it). Following the player starts afresh from it.
     public func setSpeed(_ newSpeed: Double) {
         let clamped = max(configuration.minSpeed, min(configuration.maxSpeed, newSpeed))
         follower.reset()
+        lowestSpeed = min(lowestSpeed, clamped)
         if abs(clamped - targetSpeed) > 1e-9 {
             pendingEvents.append(.speedChanged(from: targetSpeed, to: clamped))
             targetSpeed = clamped
@@ -320,11 +333,14 @@ public final class GameEngine {
         let waited = isWaiting && chord == nextChord ? max(0, clock - (waitStartClock ?? clock)) : 0
         let judgement: Judgement
         if configuration.mode == .learn || waited > 0 {
-            judgement = waited <= 0.35 && offset <= configuration.perfectWindow ? .perfect : .good
+            // Played well before the note reached the line (rushing ahead) isn't on time either.
+            judgement = waited <= 0.35 && offset <= configuration.perfectWindow && offset >= -configuration.goodWindow
+                ? .perfect : .good
         } else {
             judgement = abs(offset) <= configuration.perfectWindow ? .perfect : .good
         }
         statuses[note] = .hit(judgement)
+        held[n.midi] = (note, clock)
         if judgement == .perfect { stats.perfect += 1 } else { stats.good += 1 }
         pendingEvents.append(.hit(noteID: note, midi: n.midi, judgement: judgement,
                                   timingError: waited > 0 ? waited : offset))
@@ -354,6 +370,7 @@ public final class GameEngine {
         guard let next = follower.played(beat: chartTime(ofChord: chord), at: clock,
                                          secondsPerBeat: chart.secondsPerBeat(atSpeed: 1), lateness: lateness) else { return }
         targetSpeed = next
+        lowestSpeed = min(lowestSpeed, next)
         if abs(next - announcedSpeed) >= 0.05 {
             pendingEvents.append(.speedChanged(from: announcedSpeed, to: next))
             announcedSpeed = next
@@ -416,6 +433,56 @@ public final class GameEngine {
             holdingForSilence = false
             waitStartClock = nil
         }
+    }
+
+    // MARK: - Holding notes
+
+    /// The player let go of `midi` at `clock` (only inputs that report it: a MIDI keyboard, the screen's keys).
+    /// The note it played counts as let go of too soon if the key came up well before its written length.
+    public func release(midi: Int, at clock: Double) {
+        guard let press = held.removeValue(forKey: midi), isRunning else { return }
+        let note = chart.notes[press.note]
+        let written = note.duration * chart.secondsPerBeat(atSpeed: speed)
+        guard written >= configuration.shortestHoldChecked, statuses[press.note] != .pending else { return }
+        let needed = min(configuration.longestHoldChecked, written * configuration.holdFraction)
+        guard clock - press.clock < needed else { return }
+        releasedEarly.insert(press.note)
+        pendingEvents.append(.releasedEarly(noteID: press.note, midi: note.midi))
+    }
+
+    // MARK: - Going back
+
+    /// Moves the playhead to `beat` (no earlier than the lead-in) to play from there: every note from it on is
+    /// to play again, without counting as a mistake. In Play mode the notes then wait for the first chord.
+    public func rewind(to beat: Double, at clock: Double) {
+        guard !isFinished else { return }
+        let target = max(startPosition, beat)
+        for c in chords.indices where chartTime(ofChord: c) >= target - 1e-9 {
+            for note in chords[c] {
+                switch statuses[note] {
+                case .hit(.perfect): stats.perfect -= 1
+                case .hit: stats.good -= 1
+                case .missed: stats.missed -= 1
+                default: break
+                }
+                statuses[note] = .pending
+                releasedEarly.remove(note)
+            }
+        }
+        nextChord = chords.indices.first { c in
+            chartTime(ofChord: c) >= target - 1e-9 || chords[c].contains { statuses[$0] == .pending }
+        } ?? chords.count
+        position = target
+        history.removeAll()
+        record(clock)
+        held.removeAll()
+        isWaiting = false
+        holdingForSilence = false
+        waitStartClock = nil
+        lastInputPosition = nil
+        let from = measureStart(containing: target)
+        mistakes = mistakes.filter { $0.key < from - 1e-9 }
+        follower.interrupt()
     }
 
     // MARK: - Starting a measure over
@@ -491,10 +558,14 @@ public final class GameEngine {
         let credit = Double(stats.perfect) + 0.75 * Double(stats.good)
         let penalties = 0.5 * Double(stats.wrongNotes + retriedMisses)
         let accuracy = required == 0 ? 0 : max(0, min(1, credit / (Double(required) + penalties)))
+        // Clean: the right key, on time (perfect), and not let go of too soon.
+        let clean = chords.joined().filter { statuses[$0] == .hit(.perfect) && !releasedEarly.contains($0) }.count
+        let mastery = required == 0 ? 0 : max(0, min(1, Double(clean) / (Double(required) + penalties)))
         return GameResult(score: score, maxCombo: maxCombo, perfect: stats.perfect, good: stats.good,
                           missed: stats.missed, wrongNotes: stats.wrongNotes, accuracy: accuracy,
                           stars: GameResult.stars(forAccuracy: accuracy), startSpeed: startSpeed,
                           endSpeed: targetSpeed, mode: configuration.mode, hands: configuration.hands,
-                          completed: isFinished)
+                          completed: isFinished, mastery: mastery, releasedEarly: releasedEarly.count,
+                          lowestSpeed: lowestSpeed)
     }
 }

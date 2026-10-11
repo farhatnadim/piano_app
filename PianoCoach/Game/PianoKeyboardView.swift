@@ -17,6 +17,8 @@ struct PianoKeyboardView: View {
     var catchUp: [Int: Double] = [:]
     /// Called with the key's MIDI number when a key is touched (nil: the keyboard only shows).
     var onPress: ((Int) -> Void)?
+    /// Called with the key's MIDI number when the finger lets go of it (or slides off it).
+    var onRelease: ((Int) -> Void)?
 
     @State private var touchedKey: Int?
     @Environment(\.colorScheme) private var colorScheme
@@ -32,7 +34,10 @@ struct PianoKeyboardView: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in touch(at: value.location, size: geo.size) }
-                    .onEnded { _ in touchedKey = nil }
+                    .onEnded { _ in
+                        if let key = touchedKey { onRelease?(key) }
+                        touchedKey = nil
+                    }
             )
         }
         .accessibilityElement(children: .ignore)
@@ -45,6 +50,7 @@ struct PianoKeyboardView: View {
     private func touch(at location: CGPoint, size: CGSize) {
         guard let onPress, let key = layout.key(at: location, size: size) else { return }
         if key != touchedKey {
+            if let previous = touchedKey { onRelease?(previous) }
             touchedKey = key
             onPress(key)
         }
