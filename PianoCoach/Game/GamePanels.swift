@@ -86,25 +86,80 @@ struct SpeedBadge: View {
     }
 }
 
-/// How much of the song has been played.
+/// How much of the song has been played. While the notes can be looked back over (`canReview`), it has a
+/// disk to drag, like a video's: back to any point in the song in one go (a game: no further on than it had
+/// got), and tapping the bar jumps there.
 struct GameProgressBar: View {
     let game: GameController
 
+    /// The disk is held.
+    @State private var isScrubbing = false
+
+    static let diskSize: CGFloat = 22
+    static let touchHeight: CGFloat = 30
+
     var body: some View {
         let progress = CGFloat(max(0, min(1, game.progress)))
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Rectangle().fill(.quaternary)
-                Rectangle()
-                    .fill(LinearGradient(colors: [GameColors.rightHand, Color.accentColor],
-                                         startPoint: .leading, endPoint: .trailing))
-                    .frame(width: geo.size.width * progress)
+        if game.canReview {
+            GeometryReader { geo in
+                let inset = Self.diskSize / 2
+                let width = max(1, geo.size.width - Self.diskSize)
+                ZStack(alignment: .leading) {
+                    track(progress: progress, width: width)
+                        .frame(height: isScrubbing ? 8 : 6)
+                        .clipShape(Capsule())
+                        .padding(.horizontal, inset)
+                    Circle()
+                        .fill(.white)
+                        .overlay { Circle().strokeBorder(Color.accentColor, lineWidth: 3) }
+                        .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+                        .frame(width: Self.diskSize, height: Self.diskSize)
+                        .scaleEffect(isScrubbing ? 1.3 : 1)
+                        .offset(x: width * progress)
+                }
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            isScrubbing = true
+                            game.scrub(to: Double(max(0, min(1, (value.location.x - inset) / width))))
+                        }
+                        .onEnded { _ in
+                            isScrubbing = false
+                            game.endScrub()
+                        }
+                )
+                .animation(.easeOut(duration: 0.15), value: isScrubbing)
             }
+            .frame(height: Self.touchHeight)
+            .accessibilityElement()
+            .accessibilityLabel("Position in the song")
+            .accessibilityValue("\(Int(progress * 100)) percent")
+            .accessibilityAdjustableAction { direction in
+                let step = direction == .increment ? 0.05 : -0.05
+                game.scrub(to: max(0, min(1, Double(progress) + step)))
+                game.endScrub()
+            }
+        } else {
+            GeometryReader { geo in
+                track(progress: progress, width: geo.size.width)
+            }
+            .frame(height: 5)
+            .accessibilityElement()
+            .accessibilityLabel("Progress")
+            .accessibilityValue("\(Int(progress * 100)) percent")
         }
-        .frame(height: 5)
-        .accessibilityElement()
-        .accessibilityLabel("Progress")
-        .accessibilityValue("\(Int(progress * 100)) percent")
+    }
+
+    private func track(progress: CGFloat, width: CGFloat) -> some View {
+        ZStack(alignment: .leading) {
+            Rectangle().fill(.quaternary)
+            Rectangle()
+                .fill(LinearGradient(colors: [GameColors.rightHand, Color.accentColor],
+                                     startPoint: .leading, endPoint: .trailing))
+                .frame(width: width * progress)
+        }
     }
 }
 
@@ -176,7 +231,7 @@ struct DemoBar: View {
 
     private var speedControl: some View {
         HStack(spacing: 4) {
-            Button { game.changeSpeed(by: -0.1) } label: {
+            Button { game.changeSpeed(by: -GameController.speedStep) } label: {
                 Image(systemName: "tortoise.fill").frame(width: 30, height: 30)
             }
             .accessibilityLabel("Slower")
@@ -184,7 +239,7 @@ struct DemoBar: View {
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
                 .frame(minWidth: 44)
-            Button { game.changeSpeed(by: 0.1) } label: {
+            Button { game.changeSpeed(by: GameController.speedStep) } label: {
                 Image(systemName: "hare.fill").frame(width: 30, height: 30)
             }
             .accessibilityLabel("Faster")
@@ -564,12 +619,12 @@ struct PausedPanel: View {
                         Text("Paused")
                             .font(.largeTitle.weight(.bold))
                         HStack(spacing: 16) {
-                            stepButton(systemImage: "tortoise.fill", label: "Slower", by: -0.05, from: current)
+                            stepButton(systemImage: "tortoise.fill", label: "Slower", by: -GameController.speedStep, from: current)
                             Text(verbatim: "\(Int((current * 100).rounded())) %")
                                 .font(.title2.weight(.bold))
                                 .monospacedDigit()
                                 .frame(minWidth: 80)
-                            stepButton(systemImage: "hare.fill", label: "Faster", by: 0.05, from: current)
+                            stepButton(systemImage: "hare.fill", label: "Faster", by: GameController.speedStep, from: current)
                         }
                         Button { game.resume() } label: {
                             Label("Resume", systemImage: "play.fill")

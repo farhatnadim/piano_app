@@ -418,10 +418,10 @@ final class GameEngineTests: XCTestCase {
         XCTAssertEqual(progress.record(result(mastery: 0.94)), .same)
         XCTAssertEqual(progress.record(result(mastery: 0.97)), .same)
         XCTAssertEqual(progress.speedUpStreak(at: 0.6)?.games, 4)
-        XCTAssertEqual(progress.record(result(mastery: 0.95)), .up(to: 0.7))
+        XCTAssertEqual(progress.record(result(mastery: 0.95)), .up(to: 0.65))
         XCTAssertEqual(progress.level, 7)
         // The streak starts again at the new speed.
-        XCTAssertNil(progress.speedUpStreak(at: 0.7))
+        XCTAssertNil(progress.speedUpStreak(at: 0.65))
         XCTAssertEqual(progress.gamesPlayed, 6)
         XCTAssertEqual(progress.bestStars, 3)
     }
@@ -434,7 +434,7 @@ final class GameEngineTests: XCTestCase {
         XCTAssertEqual(progress.speed, 0.6, accuracy: 1e-9)
         XCTAssertNil(progress.speedUpStreak(at: 0.6))
         for _ in 0..<3 { XCTAssertEqual(progress.record(result(mastery: 1)), .same) }
-        XCTAssertEqual(progress.record(result(mastery: 1)), .up(to: 0.7))
+        XCTAssertEqual(progress.record(result(mastery: 1)), .up(to: 0.65))
     }
 
     func testProgressTakesTheChosenStartingSpeedAsTheLevel() {

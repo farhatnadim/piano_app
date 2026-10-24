@@ -66,7 +66,7 @@ public struct GameProgress: Codable, Hashable, Sendable {
     public static let gamesToSpeedUp = 4
     /// Average mastery over those games needed to speed up.
     public static let masteryToSpeedUp = 0.95
-    public static let speedUpStep = 0.1
+    public static let speedUpStep = 0.05
 
     /// Records a finished game. The speed never changes because of one game: the speed the player chose to
     /// start it at becomes their level, and after `gamesToSpeedUp` games in a row at (or above) that speed

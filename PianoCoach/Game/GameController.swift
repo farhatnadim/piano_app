@@ -207,6 +207,8 @@ final class GameController {
     @ObservationIgnored private var soundCounter = 0
     /// Reviewing a game: how far it had got (the notes can't be dragged further on than that).
     @ObservationIgnored private var reviewLimit: Double = 0
+    /// The Watch playback was playing when the progress bar's disk was grabbed (it plays on when let go).
+    @ObservationIgnored private var resumesAfterScrub = false
     /// When "Hold the note longer" was last shown (so it doesn't nag).
     @ObservationIgnored private var holdCheerAt: Double = -.infinity
 
@@ -461,6 +463,24 @@ final class GameController {
         if let chart { progress = max(0, min(1, position / max(0.001, chart.endBeat))) }
     }
 
+    /// The disk on the progress bar is being dragged to `fraction` of the song: like dragging the notes,
+    /// but the whole song is within reach of one drag.
+    func scrub(to fraction: Double) {
+        guard let chart else { return }
+        if !isReviewing {
+            resumesAfterScrub = phase == .demo && !isDemoPaused
+            beginReview()
+        }
+        review(to: fraction * chart.endBeat)
+    }
+
+    /// The disk was let go: the Watch playback goes on from there if it was playing, like a video; a game
+    /// stays paused for "Play from here".
+    func endScrub() {
+        if resumesAfterScrub { resumeDemo() }
+        resumesAfterScrub = false
+    }
+
     /// Ends a look back in a game: the notes from where they were left on are to play again.
     private func playFromReview(_ engine: GameEngine) {
         isReviewing = false
@@ -504,7 +524,10 @@ final class GameController {
         engine != nil && (phase == .playing || phase == .paused || isCountingIn) ? speed : startSpeed
     }
 
-    /// "Slower" / "faster": steps the speed by `step` (e.g. -0.1).
+    /// How much "slower" / "faster" changes the speed.
+    static let speedStep = 0.05
+
+    /// "Slower" / "faster": steps the speed by `step` (e.g. `-speedStep`).
     func changeSpeed(by step: Double) {
         setSpeed(((currentSpeed + step) * 20).rounded() / 20)
     }

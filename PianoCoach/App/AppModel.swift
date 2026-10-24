@@ -497,10 +497,10 @@ final class AppModel {
         case .play: game.play()
         case .pause: game.hold()
         case .slower:
-            game.changeSpeed(by: -0.1)
+            game.changeSpeed(by: -GameController.speedStep)
             confirmation += " · \(Int((game.currentSpeed * 100).rounded())) %"
         case .faster:
-            game.changeSpeed(by: 0.1)
+            game.changeSpeed(by: GameController.speedStep)
             confirmation += " · \(Int((game.currentSpeed * 100).rounded())) %"
         case .normalSpeed: game.setSpeed(1)
         case .setSpeed(let rate): game.setSpeed(rate)
