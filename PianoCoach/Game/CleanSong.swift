@@ -28,7 +28,7 @@ struct CleanSong {
     let bars: [Bar]
 
     /// Every clean song, oldest first.
-    static let all: [CleanSong] = [CleanFurElise.song, CleanTikiTiki.song] + doors
+    static let all: [CleanSong] = [CleanFurElise.song, CleanTikiTiki.song] + doors + [CleanImperialMarch.song]
 
     /// A medley video: each theme is its own song, at its own tempo.
     static let doors: [CleanSong] = [CleanDoorsDawn.song, CleanDoorsElevatorJam.song, CleanDoorsUnhinged.song,
